@@ -28,31 +28,7 @@ export const inject = ['webServer'];
  * @param {object} [config] 补丁行里的 config，见文件头注释。
  */
 export function apply(ctx, config) {
-  const center = createUpdateCenter(config, {
-    /**
-     * 拼出「带本进程登录令牌的地址」。
-     *
-     * 逻辑：停止/重启会换掉进程，旧页面手里的登录凭证随之失效，于是永远停在
-     * 「重新连接中」。真正的解法不是让用户去找新标签页，而是把新进程的登录地址
-     * 告诉旧页面，让它自己恢复。这个地址由 `connection` 服务签发——正是启动时
-     * 打印 `dsh web: http://…?token=…` 用的那一个。
-     *
-     * `connection` 不是本插件的必需依赖（没有它本插件照常工作），所以这里按
-     * 可选服务取，取不到就返回 undefined，页面退回「手动重新打开」的提示。
-     * @returns {string|undefined} 带令牌的地址。
-     */
-    loginUrl: () => {
-      try {
-        const connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined;
-        const port = typeof ctx.get === 'function' ? ctx.get('webServer')?.port : undefined;
-        if (typeof port !== 'number') return undefined;
-        if (connection === undefined || typeof connection.authenticatedUrl !== 'function') return undefined;
-        return connection.authenticatedUrl(`http://127.0.0.1:${String(port)}`);
-      } catch {
-        return undefined;
-      }
-    },
-  });
+  const center = createUpdateCenter(config);
   // 用 ctx.effect 拥有路由与定时器：插件卸载或被补丁屏蔽时自动回收。
   ctx.effect(() => center.mount(ctx), 'dsh-update-center: 路由与自动检测');
 }

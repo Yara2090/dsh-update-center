@@ -252,32 +252,17 @@ describe('更新面板路由', () => {
     assert.match(String(restart.body.error), /启动器脚本/);
   });
 
-  it('脚本齐全时排定动作，并打开「让页面自己回来」的时间窗', async () => {
+  it('脚本齐全时排定停止动作', async () => {
     // 放两个假脚本：真被执行的会是它们，因此这个用例不会碰真实服务。
     writeFileSync(path.join(home, 'launch-deepseek-harness.ps1'), '# fake launcher\n');
     writeFileSync(path.join(home, 'stop-deepseek-harness.ps1'), '# fake stopper\n');
-    const token = 'http://127.0.0.1:3080/?token=test-token';
-    const fresh = createUpdateCenter({ registry: registry.origin }, { loginUrl: () => token });
+    const fresh = createUpdateCenter({ registry: registry.origin });
     const { status, body } = await invoke(fresh, { method: 'POST', url: `${ROUTE_PREFIX}/stop`, body: '{}' });
     assert.equal(status, 200);
     assert.equal(body.scheduled, true);
     assert.equal(body.action, 'stop');
-    assert.equal(typeof body.resumeAt, 'number');
-    // 本进程就是即将被杀掉的那一个，绝不能把自己的令牌交出去——页面拿了它跳过去，
-    // 会「刷新一下又变回重新连接中」。
-    assert.equal(body.loginUrl, undefined);
+    assert.match(String(body.script), /stop-deepseek-harness\.ps1$/);
     fresh.dispose();
-  });
-
-  it('后来起来的进程才交出登录地址（页面靠它自己恢复）', async () => {
-    const freshToken = 'http://127.0.0.1:3080/?token=fresh';
-    // 上一个用例已经把 resumeAt 写进了同一个 home；新进程挂在 mount 时读它。
-    const next = createUpdateCenter({ registry: registry.origin }, { loginUrl: () => freshToken });
-    const unmount = next.mount({ webServer: { register: () => () => {} } });
-    const { body } = await invoke(next, { url: `${ROUTE_PREFIX}/state` });
-    assert.equal(body.loginUrl, freshToken);
-    unmount();
-    next.dispose();
   });
 });
 

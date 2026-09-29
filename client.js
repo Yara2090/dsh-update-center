@@ -24,10 +24,8 @@ window.__ModuleLoader__.load({
     const ENDPOINT = '/dsh-update-center';
     /** 检测或安装进行中的轮询间隔。 */
     const POLL_MS = 1000;
-    /** 停止/重启之后，等待「服务回来」的轮询间隔。 */
-    const RESUME_POLL_MS = 2000;
-    /** 最多等多久（次数 × 间隔 ≈ 5 分钟），超时就退回手动提示。 */
-    const RESUME_ATTEMPTS = 150;
+    /** 调 window.close() 之后等多久判定「浏览器拒绝了」，用来把话说实。 */
+    const CLOSE_CHECK_MS = 1200;
 
     /**
      * 依次尝试的路由基址。
@@ -130,33 +128,22 @@ window.__ModuleLoader__.load({
       ck_node_version: 'Node version',
       ck_dsh_install: 'Harness installation',
       lifecycleSection: 'Service control',
-      lifecycleHint: 'Closing the browser does NOT stop the Harness — it keeps running in the background. Use these buttons to actually stop or restart it.',
+      lifecycleHint: 'Closing the browser does NOT stop the Harness — it keeps running in the background. Use the button below to actually stop it.',
       lifecycleStop: 'Stop Harness',
-      lifecycleRestart: 'Restart Harness',
       lifecycleConfirmStop: 'Click again to stop',
-      lifecycleConfirmRestart: 'Click again to restart',
       lifecycleScheduledStop: (seconds) => `Scheduled: the service stops in about ${seconds} s and this page will disconnect.`,
-      lifecycleScheduledRestart: (seconds) => `Scheduled: the service restarts in about ${seconds} s. A new tab opens automatically with a fresh sign-in link.`,
       lifecycleMissingStop: (target) => `Cannot stop from here: ${target} was not found.`,
-      lifecycleMissingRestart: (target) => `Cannot restart from here: ${target} was not found.`,
       lifecycleFailed: 'The action could not be scheduled',
       lifecycleLastOk: (action) => `Last "${action}": the helper process started.`,
       lifecycleLastFailed: (error) => `The last action never ran: ${error}`,
       lifecycleLastDone: (action, at) => `Last "${action}" was carried out at ${at}.`,
-      lifecycleStopEffect: 'Stop: the service shuts down and does NOT come back. Reopen it with the "DeepSeek Harness" shortcut on your desktop.',
-      lifecycleRestartEffect: 'Restart: stops and starts again (about 10 s), then opens a fresh tab with a new sign-in link. Use this after installing an update.',
-      lifecycleAfterStop: 'The page will keep showing "connecting" — that is expected, the service is gone. Double-click the "DeepSeek Harness" shortcut on your desktop to open it again.',
-      lifecycleAfterRestart: 'The page disconnects for about 10 s. If no new tab appears, double-click the "DeepSeek Harness" shortcut on your desktop.',
-      lifecycleOverlayRestartTitle: 'The service is restarting',
-      lifecycleOverlayRestartBody: 'The service is restarting. This tab recovers by itself once it is back — no need to look for a new tab, and no need to close this one.',
-      lifecycleOverlayStopTitle: 'The service has been stopped',
-      lifecycleOverlayStopBody: 'The service has been stopped. Once you start the Harness again (double-click the "DeepSeek Harness" shortcut), this tab recovers by itself.',
-      lifecycleOverlayHint: 'If it is still stuck after a few minutes, double-click the "DeepSeek Harness" shortcut on your desktop.',
-      lifecycleOverlayDismiss: 'Got it',
-      lifecycleManualOpen: 'Reopen now',
-      lifecycleManualOpening: 'Opening…',
-      lifecycleManualNotReady: 'The service is not back yet — this tab recovers by itself once it is.',
-      lifecycleManualUnreachable: 'Still cannot reach the service (it may be restarting).',
+      lifecycleStopEffect: 'Stop: the Harness shuts down for good. This page then offers to close the tab — reopen the Harness later with the "DeepSeek Harness" shortcut on your desktop.',
+      lifecycleOverlayStopTitle: 'Stopping the Harness',
+      lifecycleOverlayStopBody: 'The service is about to shut down and this page will lose its connection. You can close this tab now; reopen the Harness later with the "DeepSeek Harness" shortcut on your desktop.',
+      lifecycleOverlayCloseTab: 'Close this tab',
+      lifecycleOverlayCloseRefused: 'The browser does not let a page close its own tab. Press Ctrl+W (or click the tab\'s ×) to close it.',
+      lifecycleOverlayClosing: 'Closing…',
+      lifecycleOverlayDismiss: 'Keep it open',
       installSection: 'Install',
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
       command: 'Command',
@@ -171,6 +158,7 @@ window.__ModuleLoader__.load({
       installingHint: 'Keep this plugin enabled while it installs: disabling or reloading it terminates the installer.',
       totalTime: 'Total time',
       restart: 'The new version is on disk. Restart the Harness to run it.',
+      restartHow: 'Click "Stop Harness" below, then start it again with the "DeepSeek Harness" shortcut on your desktop.',
       installed: 'Install finished.',
       installFailed: 'The installer did not finish successfully',
       unavailable: 'The update service is not reachable. It is served over loopback only, so a remote browser cannot use this page.',
@@ -232,33 +220,22 @@ window.__ModuleLoader__.load({
       ck_node_version: 'Node 版本',
       ck_dsh_install: 'Harness 安装',
       lifecycleSection: '运行控制',
-      lifecycleHint: '关闭浏览器并不会停止 Harness —— 它会在后台继续运行。要真正停止或重启，用下面的按钮。',
+      lifecycleHint: '关闭浏览器并不会停止 Harness —— 它会在后台继续运行。要真正停止，用下面的按钮。',
       lifecycleStop: '停止 Harness',
-      lifecycleRestart: '重启 Harness',
       lifecycleConfirmStop: '再点一次即停止',
-      lifecycleConfirmRestart: '再点一次即重启',
       lifecycleScheduledStop: (seconds) => `已安排：服务将在约 ${seconds} 秒后停止，本页面会断开连接。`,
-      lifecycleScheduledRestart: (seconds) => `已安排：服务将在约 ${seconds} 秒后重启，并自动打开带新登录链接的标签页。`,
       lifecycleMissingStop: (target) => `无法从这里停止：找不到 ${target}。`,
-      lifecycleMissingRestart: (target) => `无法从这里重启：找不到 ${target}。`,
       lifecycleFailed: '动作没有安排成功',
       lifecycleLastOk: (action) => `上次「${action}」：启动器子进程已成功拉起。`,
       lifecycleLastFailed: (error) => `上次动作根本没有跑起来：${error}`,
       lifecycleLastDone: (action, at) => `上次「${action}」已于 ${at} 执行。`,
-      lifecycleStopEffect: '停止：服务就此关掉。你再次启动 Harness 后，这个页面会自己恢复；想立刻打开就双击桌面的「DeepSeek Harness」快捷方式。',
-      lifecycleRestartEffect: '重启：自动停掉再起来（约 10 秒），服务回来后这个页面会自己恢复。装完更新后用这个。',
-      lifecycleAfterStop: '这个页面会一直显示「连接中」，但你不必管它：等你再次启动 Harness 后，它会自己恢复。',
-      lifecycleAfterRestart: '这个页面会断开约 10 秒，服务回来后它会自己恢复 —— 不需要去找新标签页。',
-      lifecycleOverlayRestartTitle: '服务正在重启',
-      lifecycleOverlayRestartBody: '这个标签页会在服务回来后自动恢复 —— 你不用去找新标签页，也不用关掉它。',
-      lifecycleOverlayStopTitle: '服务已按你的要求停止',
-      lifecycleOverlayStopBody: '等你再次启动 Harness（双击桌面「DeepSeek Harness」）后，这个标签页会自己恢复。',
-      lifecycleOverlayHint: '如果几分钟后它仍停在这里，双击桌面「DeepSeek Harness」。',
-      lifecycleOverlayDismiss: '知道了',
-      lifecycleManualOpen: '立即重新打开',
-      lifecycleManualOpening: '正在打开…',
-      lifecycleManualNotReady: '服务还没起来 —— 等它起来后这个标签页会自己恢复。',
-      lifecycleManualUnreachable: '还连不上服务（可能仍在重启）。',
+      lifecycleStopEffect: '停止：Harness 就此关掉。之后这个页面会提示你关闭标签页；下次要用时，双击桌面「DeepSeek Harness」快捷方式。',
+      lifecycleOverlayStopTitle: '正在停止 Harness',
+      lifecycleOverlayStopBody: '服务即将关闭，本页面随后会断开连接。你现在就可以关掉这个标签页；下次要用时双击桌面「DeepSeek Harness」快捷方式。',
+      lifecycleOverlayCloseTab: '关闭此标签页',
+      lifecycleOverlayCloseRefused: '浏览器不允许网页自己关闭标签页，请按 Ctrl+W（或点标签页上的 ×）关闭。',
+      lifecycleOverlayClosing: '正在关闭…',
+      lifecycleOverlayDismiss: '先留着',
       installSection: '安装',
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
       command: '命令',
@@ -273,6 +250,7 @@ window.__ModuleLoader__.load({
       installingHint: '安装期间请让本插件保持启用：禁用或重载它会直接终止安装进程。',
       totalTime: '总耗时',
       restart: '新版本已写入磁盘，重启 Harness 后生效。',
+      restartHow: '点下面的「停止 Harness」，然后用桌面「DeepSeek Harness」快捷方式重新启动。',
       installed: '安装完成。',
       installFailed: '安装未能成功完成',
       unavailable: '无法访问更新服务。该服务只对本机回环地址开放，远程浏览器无法使用此页面。',
@@ -557,36 +535,32 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 手动恢复入口：问一次状态，拿到带令牌的地址就跳过去。
+     * 关闭当前标签页。
      *
-     * 逻辑：自动轮询之外的第二条路。它只在用户点击时才发请求，因此不受任何定时器
-     * 或浏览器策略影响；服务还没起来时如实说「还没起来」，而不是装作在忙。
+     * 逻辑：浏览器只允许「由脚本打开的」或「没有历史记录的」标签页被脚本关闭，
+     * 而这里的页面是启动器从外部打开的（地址 303 之后还留下了两条历史），所以
+     * `window.close()` 通常会被拒绝。既然做不到，就不能假装做到了：调用之后等
+     * 一小段时间，如果代码还在跑，就说明浏览器拒绝了，页面必须如实这么说。
      */
-    function useManualResume() {
-      const [pending, setPending] = React.useState(false);
-      // 失败原因是机器可读的标记，文案交给页面渲染（词典在页面那一侧）。
-      const [failure, setFailure] = React.useState(null);
+    function useCloseTab() {
+      const [closing, setClosing] = React.useState(false);
+      const [refused, setRefused] = React.useState(false);
 
-      const open = React.useCallback(async () => {
-        setPending(true);
+      const close = React.useCallback(() => {
+        setClosing(true);
         try {
-          const body = await request('state', {
-            headers: { accept: 'application/json' },
-            cache: 'no-store',
-          });
-          if (typeof body?.loginUrl === 'string' && body.loginUrl !== '') {
-            window.location.replace(body.loginUrl);
-            return; // 页面即将离开，不必再改状态
-          }
-          setFailure('not-ready');
+          window.close();
         } catch {
-          setFailure('unreachable');
-        } finally {
-          setPending(false);
+          /* 某些浏览器直接抛错，按拒绝处理 */
         }
+        // 只有「没关掉」才会执行到这里，因此这就是浏览器拒绝的证据。
+        window.setTimeout(() => {
+          setClosing(false);
+          setRefused(true);
+        }, CLOSE_CHECK_MS);
       }, []);
 
-      return { pending, failure, open };
+      return { closing, refused, close };
     }
 
     /**
@@ -661,13 +635,22 @@ window.__ModuleLoader__.load({
       const { state, failure, busy, post } = useCenterState();
       const integrity = useIntegrity();
       const lifecycle = useLifecycle();
-      const manual = useManualResume();
+      const closer = useCloseTab();
+
+      // 用户要的是「停掉服务，并且把网页关掉」：浮层先出现，随后自动尝试关闭标签页。
+      // 依赖 closer.close（useCallback 稳定）而不是 closer 对象，避免每次渲染都重跑。
+      React.useEffect(() => {
+        if (lifecycle.outcome === null) return undefined;
+        const timer = window.setTimeout(() => {
+          closer.close();
+        }, 600);
+        return () => window.clearTimeout(timer);
+      }, [lifecycle.outcome, closer.close]);
       // 浮层只负责「告诉用户接下来去哪」，允许关掉。
       const [overlayDismissed, setOverlayDismissed] = React.useState(false);
       // 运行控制相关：能力来自 Host 对「本机有没有启动器/停止脚本」的探测。
       const lifecycleState = state?.lifecycle;
       const stopReady = lifecycleState?.canStop === true;
-      const restartReady = lifecycleState?.canRestart === true;
       const controlBusy = lifecycle.pending !== null || lifecycle.outcome !== null;
       /** 生成一个「点两次确认」的按钮；variant 决定它的配色（停止用错误色以示不可逆）。 */
       const controlButton = (action, baseLabel, confirmLabel, ready, missingLabel, variant) => h('button', {
@@ -866,10 +849,8 @@ window.__ModuleLoader__.load({
         state?.restartRequired === true
           ? h('div', { className: 'duc_status duc_warn', key: 'restart' }, [
             t('restart'),
-            // 既然装了新版本就是要重启，索性把按钮放在这句话旁边，少一步来回。
-            restartReady && !controlBusy
-              ? controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), true, '', 'duc_buttonPrimary')
-              : null,
+            // 面板里不再提供「重启」：停掉之后用桌面快捷方式启动即可，路径只有一条。
+            h('div', { className: 'duc_hint', key: 'how' }, t('restartHow')),
           ])
           : null,
         state?.updateResult?.ok === true && state?.restartRequired !== true
@@ -970,30 +951,16 @@ window.__ModuleLoader__.load({
         ]),
       ]);
 
-      // 运行控制：说清「关浏览器 ≠ 停服务」，并把真的停/重启放进来。
-      // 两个按钮的差别必须写在点之前——点下去之后页面就只剩「连接中」，
-      // 那时候再解释已经晚了。
-      const armedEffect = lifecycle.armed === 'stop'
-        ? t('lifecycleAfterStop')
-        : (lifecycle.armed === 'restart' ? t('lifecycleAfterRestart') : null);
-      const scheduledEffect = lifecycle.outcome === null
-        ? null
-        : (lifecycle.outcome.action === 'stop' ? t('lifecycleAfterStop') : t('lifecycleAfterRestart'));
+      // 运行控制：只保留「停止」这一个动作。重启已经去掉——停止之后靠桌面快捷方式
+      // 重新启动，路径只有一条，不会再出现「到底是停还是重启」的困惑。
       const lastAction = state?.lifecycleLast;
-      const lastActionName = lastAction === undefined
-        ? ''
-        : (lastAction.action === 'stop' ? t('lifecycleStop') : t('lifecycleRestart'));
+      const lastActionName = lastAction === undefined ? '' : t('lifecycleStop');
       const lifecycleCard = h('div', { className: 'duc_card', key: 'lifecycle' }, [
         h('div', { className: 'duc_cardTitle', key: 'title' }, t('lifecycleSection')),
         h('div', { className: 'duc_hint', key: 'hint' }, t('lifecycleHint')),
-        // 两个动作各自会发生什么，常驻显示。
         h('div', { className: 'duc_hint', key: 'stopEffect' }, t('lifecycleStopEffect')),
-        h('div', { className: 'duc_hint', key: 'restartEffect' }, t('lifecycleRestartEffect')),
         lifecycle.failure !== null
           ? h('div', { className: 'duc_status duc_error', key: 'fail' }, `${t('lifecycleFailed')}：${lifecycle.failure}`)
-          : null,
-        armedEffect !== null
-          ? h('div', { className: 'duc_status duc_warn', key: 'armed', role: 'status', 'aria-live': 'polite' }, armedEffect)
           : null,
         lifecycle.outcome !== null
           ? h('div', {
@@ -1001,17 +968,10 @@ window.__ModuleLoader__.load({
             key: 'scheduled',
             role: 'status',
             'aria-live': 'polite',
-          }, [
-            (lifecycle.outcome.action === 'stop' ? t('lifecycleScheduledStop') : t('lifecycleScheduledRestart'))(
-              Math.round((lifecycle.outcome.delayMs ?? 2000) / 1000),
-            ),
-            scheduledEffect === null ? null : h('div', { key: 'after' }, scheduledEffect),
-          ])
+          }, t('lifecycleScheduledStop')(Math.round((lifecycle.outcome.delayMs ?? 2000) / 1000)))
           : null,
         stopReady ? null : h('div', { className: 'duc_hint', key: 'nostop' },
           t('lifecycleMissingStop')(String(lifecycleState?.stopper ?? ''))),
-        restartReady ? null : h('div', { className: 'duc_hint', key: 'norestart' },
-          t('lifecycleMissingRestart')(String(lifecycleState?.launcher ?? ''))),
         // 上一次动作的真实结果。「点了没反应」之所以难查，就是因为没人告诉你
         // 那个子进程到底起来没有——现在这里会直说，而且跨重启保留。
         lastAction === undefined || lifecycle.outcome !== null
@@ -1026,79 +986,33 @@ window.__ModuleLoader__.load({
               : t('lifecycleLastDone')(lastActionName, formatCheckedAt(lastAction.at, t)))),
         h('div', { className: 'duc_actions', key: 'actions' }, [
           controlButton('stop', t('lifecycleStop'), t('lifecycleConfirmStop'), stopReady, String(lifecycleState?.stopper ?? ''), 'duc_buttonDanger'),
-          controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), restartReady, String(lifecycleState?.launcher ?? ''), 'duc_buttonPrimary'),
         ]),
       ]);
 
-      // 动作排定后这个页面会一直「重新连接中」，但它其实可以自己回来：Host 在动作
-      // 之后的时间窗里会在状态里带上新进程签发的登录地址，拿到就跳过去。这样用户
-      // 既不用去找新标签页，也不用关掉这一页。
-      React.useEffect(() => {
-        if (lifecycle.outcome === null) return undefined;
-        let stopped = false;
-        let attempts = 0;
-        const timer = setInterval(() => {
-          attempts += 1;
-          if (attempts > RESUME_ATTEMPTS) {
-            // 等太久了（比如服务根本没起来），停在这里，把提示留给浮层。
-            clearInterval(timer);
-            return;
-          }
-          void (async () => {
-            try {
-              const body = await request('state', {
-                headers: { accept: 'application/json' },
-                cache: 'no-store',
-              });
-              if (stopped) return;
-              if (typeof body?.loginUrl === 'string' && body.loginUrl !== '') {
-                clearInterval(timer);
-                window.location.replace(body.loginUrl);
-              }
-            } catch {
-              /* 服务还没回来，继续等 */
-            }
-          })();
-        }, RESUME_POLL_MS);
-        return () => {
-          stopped = true;
-          clearInterval(timer);
-        };
-      }, [lifecycle.outcome]);
-
-      // 动作一旦排定，旧页面的连接就注定先断掉；盖一层说清楚「它会自己回来」。
+      // 动作一旦排定，这个页面就注定失去连接。盖一层说清楚「停完了、把这个标签页关掉」，
+      // 并尝试自己关——浏览器多半会拒绝，那就如实说，而不是留一个转圈的界面。
       const lifecycleOverlay = lifecycle.outcome === null || overlayDismissed
         ? null
         : h('div', { className: 'duc_overlay', key: 'overlay', role: 'alertdialog', 'aria-live': 'assertive' },
           h('div', { className: 'duc_overlayCard' }, [
-            h('div', { className: 'duc_overlayTitle', key: 'title' },
-              lifecycle.outcome.action === 'stop' ? t('lifecycleOverlayStopTitle') : t('lifecycleOverlayRestartTitle')),
-            h('div', { key: 'body' },
-              lifecycle.outcome.action === 'stop' ? t('lifecycleOverlayStopBody') : t('lifecycleOverlayRestartBody')),
-            h('div', { className: 'duc_hint', key: 'hint' }, t('lifecycleOverlayHint')),
+            h('div', { className: 'duc_overlayTitle', key: 'title' }, t('lifecycleOverlayStopTitle')),
+            h('div', { key: 'body' }, t('lifecycleOverlayStopBody')),
+            closer.refused ? h('div', { className: 'duc_hint duc_error', key: 'refused' }, t('lifecycleOverlayCloseRefused')) : null,
             h('div', { className: 'duc_actions', key: 'actions' }, [
-              // 自动恢复之外再给一个手动入口：万一定时器在这台浏览器上没有跑起来，
-              // 用户至少还有一个「点一下就走」的确定路径。
               h('button', {
-                key: 'manual',
+                key: 'close',
                 type: 'button',
-                className: 'duc_button duc_buttonOutline',
-                disabled: manual.pending,
-                onClick: () => {
-                  void manual.open();
-                },
-              }, manual.pending ? t('lifecycleManualOpening') : t('lifecycleManualOpen')),
+                className: 'duc_button duc_buttonPrimary',
+                disabled: closer.closing,
+                onClick: closer.close,
+              }, closer.closing ? t('lifecycleOverlayClosing') : t('lifecycleOverlayCloseTab')),
               h('button', {
                 key: 'dismiss',
                 type: 'button',
-                className: 'duc_button duc_buttonPrimary',
+                className: 'duc_button duc_buttonOutline',
                 onClick: () => setOverlayDismissed(true),
               }, t('lifecycleOverlayDismiss')),
             ]),
-            manual.failure === null
-              ? null
-              : h('div', { className: 'duc_hint duc_error', key: 'manualfail' },
-                manual.failure === 'not-ready' ? t('lifecycleManualNotReady') : t('lifecycleManualUnreachable')),
           ]));
 
       return h(React.Fragment, null, [
