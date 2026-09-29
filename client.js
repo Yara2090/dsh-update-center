@@ -143,6 +143,11 @@ window.__ModuleLoader__.load({
       lifecycleRestartEffect: 'Restart: stops and starts again (about 10 s), then opens a fresh tab with a new sign-in link. Use this after installing an update.',
       lifecycleAfterStop: 'The page will keep showing "connecting" — that is expected, the service is gone. Double-click the "DeepSeek Harness" shortcut on your desktop to open it again.',
       lifecycleAfterRestart: 'The page disconnects for about 10 s. If no new tab appears, double-click the "DeepSeek Harness" shortcut on your desktop.',
+      lifecycleOverlayRestartTitle: 'The service is restarting',
+      lifecycleOverlayRestartBody: 'The launcher has already opened a new tab with a fresh sign-in link — switch to that tab to keep working. This old page will keep showing "reconnecting": it cannot come back, and that is expected.',
+      lifecycleOverlayStopTitle: 'The service has been stopped',
+      lifecycleOverlayStopBody: 'The Harness is now shut down and will not come back on its own. To reopen it, double-click the "DeepSeek Harness" shortcut on your desktop. This page staying on "reconnecting" is expected.',
+      lifecycleOverlayDismiss: 'Got it',
       installSection: 'Install',
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
       command: 'Command',
@@ -235,6 +240,11 @@ window.__ModuleLoader__.load({
       lifecycleRestartEffect: '重启：自动停掉再起来（约 10 秒），完成后弹出带新登录链接的标签页。装完更新后用这个。',
       lifecycleAfterStop: '页面会一直显示「连接中」——这是正常的，服务已经不在了。双击桌面「DeepSeek Harness」即可重新打开。',
       lifecycleAfterRestart: '页面会断开约 10 秒。若没有自动弹出新标签页，双击桌面「DeepSeek Harness」。',
+      lifecycleOverlayRestartTitle: '服务正在重启',
+      lifecycleOverlayRestartBody: '启动器已经在新标签页里打开了带登录链接的页面，请切到那个标签页继续使用。这个旧页面会一直显示「重新连接中」——它回不来了，这是正常的。',
+      lifecycleOverlayStopTitle: '服务已按你的要求停止',
+      lifecycleOverlayStopBody: 'Harness 已经关掉，不会自己回来。要重新打开：双击桌面上的「DeepSeek Harness」快捷方式。这个页面停在「重新连接中」属于正常现象。',
+      lifecycleOverlayDismiss: '知道了',
       installSection: '安装',
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
       command: '命令',
@@ -310,6 +320,11 @@ window.__ModuleLoader__.load({
 .duc_checkMark{flex:0 0 auto;width:12px;font-weight:600}
 .duc_checkName{flex:0 0 auto;color:var(--dsw-alias-label-primary)}
 .duc_checkDetail{flex:1;min-width:0;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;overflow-wrap:anywhere}
+/* 停止/重启之后旧页面会永远停在「重新连接中」。既然它回不来，就盖一层说清楚
+   「发生了什么、接下来该去哪」——这是用户唯一还能看见的提示。 */
+.duc_overlay{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.55)}
+.duc_overlayCard{width:100%;max-width:520px;display:flex;flex-direction:column;gap:10px;padding:20px;border-radius:var(--dsw-radius-md);border:0.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:14px;line-height:22px;box-shadow:0 12px 40px rgba(0,0,0,0.35)}
+.duc_overlayTitle{font-size:16px;font-weight:600;line-height:24px}
 @keyframes duc_slide{0%{left:-35%}100%{left:100%}}
 /* 前庭敏感的用户不该被迫盯着一条来回滑动的亮条：改成静态满宽提示。 */
 @media (prefers-reduced-motion: reduce){.duc_progressBar{animation:none;left:0;width:100%;opacity:0.6}}
@@ -599,6 +614,8 @@ window.__ModuleLoader__.load({
       const { state, failure, busy, post } = useCenterState();
       const integrity = useIntegrity();
       const lifecycle = useLifecycle();
+      // 浮层只负责「告诉用户接下来去哪」，允许关掉。
+      const [overlayDismissed, setOverlayDismissed] = React.useState(false);
       // 运行控制相关：能力来自 Host 对「本机有没有启动器/停止脚本」的探测。
       const lifecycleState = state?.lifecycle;
       const stopReady = lifecycleState?.canStop === true;
@@ -965,9 +982,27 @@ window.__ModuleLoader__.load({
         ]),
       ]);
 
+      // 动作一旦排定，旧页面的连接就注定回不来；盖一层把「去哪继续用」说清楚。
+      const lifecycleOverlay = lifecycle.outcome === null || overlayDismissed
+        ? null
+        : h('div', { className: 'duc_overlay', key: 'overlay', role: 'alertdialog', 'aria-live': 'assertive' },
+          h('div', { className: 'duc_overlayCard' }, [
+            h('div', { className: 'duc_overlayTitle', key: 'title' },
+              lifecycle.outcome.action === 'stop' ? t('lifecycleOverlayStopTitle') : t('lifecycleOverlayRestartTitle')),
+            h('div', { key: 'body' },
+              lifecycle.outcome.action === 'stop' ? t('lifecycleOverlayStopBody') : t('lifecycleOverlayRestartBody')),
+            h('div', { className: 'duc_actions', key: 'actions' }, h('button', {
+              key: 'dismiss',
+              type: 'button',
+              className: 'duc_button duc_buttonPrimary',
+              onClick: () => setOverlayDismissed(true),
+            }, t('lifecycleOverlayDismiss'))),
+          ]));
+
       return h(React.Fragment, null, [
         h('style', { key: 'css' }, CSS),
         h('div', { className: 'duc_page', key: 'page' }, [header, versionCard, integrityCard, autoCard, installCard, lifecycleCard]),
+        lifecycleOverlay,
       ]);
     }
 

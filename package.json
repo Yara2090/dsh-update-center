@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-update-center",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "private": true,
   "type": "module",
   "description": "Updates & Version settings page for the DeepSeek Harness Web GUI: detects a newer @deepseek-ai/dsh release, installs it, self-checks the plugin installation with a one-click repair, and stops or restarts the service.",
