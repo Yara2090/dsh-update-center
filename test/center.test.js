@@ -10,7 +10,7 @@
  * 安装动作本身不会真跑 npm：只在「尚未检测到版本」这条前置校验上验证它被拒绝。
  */
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -250,6 +250,22 @@ describe('更新面板路由', () => {
     assert.equal(restart.status, 409);
     assert.equal(restart.body.ok, false);
     assert.match(String(restart.body.error), /启动器脚本/);
+  });
+
+  it('脚本齐全时排定动作，并把「让页面自己回来」的登录地址交给它', async () => {
+    // 放两个假脚本：真被执行的会是它们，因此这个用例不会碰真实服务。
+    writeFileSync(path.join(home, 'launch-deepseek-harness.ps1'), '# fake launcher\n');
+    writeFileSync(path.join(home, 'stop-deepseek-harness.ps1'), '# fake stopper\n');
+    const token = 'http://127.0.0.1:3080/?token=test-token';
+    const fresh = createUpdateCenter({ registry: registry.origin }, { loginUrl: () => token });
+    const { status, body } = await invoke(fresh, { method: 'POST', url: `${ROUTE_PREFIX}/stop`, body: '{}' });
+    assert.equal(status, 200);
+    assert.equal(body.scheduled, true);
+    assert.equal(body.action, 'stop');
+    // 旧页面就是靠这个地址把自己救回来的：没有它，用户只能看着「重新连接中」。
+    assert.equal(body.loginUrl, token);
+    assert.equal(typeof body.resumeAt, 'number');
+    fresh.dispose();
   });
 });
 

@@ -24,6 +24,10 @@ window.__ModuleLoader__.load({
     const ENDPOINT = '/dsh-update-center';
     /** 检测或安装进行中的轮询间隔。 */
     const POLL_MS = 1000;
+    /** 停止/重启之后，等待「服务回来」的轮询间隔。 */
+    const RESUME_POLL_MS = 2000;
+    /** 最多等多久（次数 × 间隔 ≈ 5 分钟），超时就退回手动提示。 */
+    const RESUME_ATTEMPTS = 150;
 
     /**
      * 依次尝试的路由基址。
@@ -144,9 +148,10 @@ window.__ModuleLoader__.load({
       lifecycleAfterStop: 'The page will keep showing "connecting" — that is expected, the service is gone. Double-click the "DeepSeek Harness" shortcut on your desktop to open it again.',
       lifecycleAfterRestart: 'The page disconnects for about 10 s. If no new tab appears, double-click the "DeepSeek Harness" shortcut on your desktop.',
       lifecycleOverlayRestartTitle: 'The service is restarting',
-      lifecycleOverlayRestartBody: 'The launcher has already opened a new tab with a fresh sign-in link — switch to that tab to keep working. This old page will keep showing "reconnecting": it cannot come back, and that is expected.',
+      lifecycleOverlayRestartBody: 'The service is restarting. This tab recovers by itself once it is back — no need to look for a new tab, and no need to close this one.',
       lifecycleOverlayStopTitle: 'The service has been stopped',
-      lifecycleOverlayStopBody: 'The Harness is now shut down and will not come back on its own. To reopen it, double-click the "DeepSeek Harness" shortcut on your desktop. This page staying on "reconnecting" is expected.',
+      lifecycleOverlayStopBody: 'The service has been stopped. Once you start the Harness again (double-click the "DeepSeek Harness" shortcut), this tab recovers by itself.',
+      lifecycleOverlayHint: 'If it is still stuck after a few minutes, double-click the "DeepSeek Harness" shortcut on your desktop.',
       lifecycleOverlayDismiss: 'Got it',
       installSection: 'Install',
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
@@ -236,14 +241,15 @@ window.__ModuleLoader__.load({
       lifecycleLastOk: (action) => `上次「${action}」：启动器子进程已成功拉起。`,
       lifecycleLastFailed: (error) => `上次动作根本没有跑起来：${error}`,
       lifecycleLastDone: (action, at) => `上次「${action}」已于 ${at} 执行。`,
-      lifecycleStopEffect: '停止：服务就此关掉，不会自己回来。要再打开，双击桌面的「DeepSeek Harness」快捷方式。',
-      lifecycleRestartEffect: '重启：自动停掉再起来（约 10 秒），完成后弹出带新登录链接的标签页。装完更新后用这个。',
-      lifecycleAfterStop: '页面会一直显示「连接中」——这是正常的，服务已经不在了。双击桌面「DeepSeek Harness」即可重新打开。',
-      lifecycleAfterRestart: '页面会断开约 10 秒。若没有自动弹出新标签页，双击桌面「DeepSeek Harness」。',
+      lifecycleStopEffect: '停止：服务就此关掉。你再次启动 Harness 后，这个页面会自己恢复；想立刻打开就双击桌面的「DeepSeek Harness」快捷方式。',
+      lifecycleRestartEffect: '重启：自动停掉再起来（约 10 秒），服务回来后这个页面会自己恢复。装完更新后用这个。',
+      lifecycleAfterStop: '这个页面会一直显示「连接中」，但你不必管它：等你再次启动 Harness 后，它会自己恢复。',
+      lifecycleAfterRestart: '这个页面会断开约 10 秒，服务回来后它会自己恢复 —— 不需要去找新标签页。',
       lifecycleOverlayRestartTitle: '服务正在重启',
-      lifecycleOverlayRestartBody: '启动器已经在新标签页里打开了带登录链接的页面，请切到那个标签页继续使用。这个旧页面会一直显示「重新连接中」——它回不来了，这是正常的。',
+      lifecycleOverlayRestartBody: '这个标签页会在服务回来后自动恢复 —— 你不用去找新标签页，也不用关掉它。',
       lifecycleOverlayStopTitle: '服务已按你的要求停止',
-      lifecycleOverlayStopBody: 'Harness 已经关掉，不会自己回来。要重新打开：双击桌面上的「DeepSeek Harness」快捷方式。这个页面停在「重新连接中」属于正常现象。',
+      lifecycleOverlayStopBody: '等你再次启动 Harness（双击桌面「DeepSeek Harness」）后，这个标签页会自己恢复。',
+      lifecycleOverlayHint: '如果几分钟后它仍停在这里，双击桌面「DeepSeek Harness」。',
       lifecycleOverlayDismiss: '知道了',
       installSection: '安装',
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
@@ -982,7 +988,43 @@ window.__ModuleLoader__.load({
         ]),
       ]);
 
-      // 动作一旦排定，旧页面的连接就注定回不来；盖一层把「去哪继续用」说清楚。
+      // 动作排定后这个页面会一直「重新连接中」，但它其实可以自己回来：Host 在动作
+      // 之后的时间窗里会在状态里带上新进程签发的登录地址，拿到就跳过去。这样用户
+      // 既不用去找新标签页，也不用关掉这一页。
+      React.useEffect(() => {
+        if (lifecycle.outcome === null) return undefined;
+        let stopped = false;
+        let attempts = 0;
+        const timer = setInterval(() => {
+          attempts += 1;
+          if (attempts > RESUME_ATTEMPTS) {
+            // 等太久了（比如服务根本没起来），停在这里，把提示留给浮层。
+            clearInterval(timer);
+            return;
+          }
+          void (async () => {
+            try {
+              const body = await request('state', {
+                headers: { accept: 'application/json' },
+                cache: 'no-store',
+              });
+              if (stopped) return;
+              if (typeof body?.loginUrl === 'string' && body.loginUrl !== '') {
+                clearInterval(timer);
+                window.location.replace(body.loginUrl);
+              }
+            } catch {
+              /* 服务还没回来，继续等 */
+            }
+          })();
+        }, RESUME_POLL_MS);
+        return () => {
+          stopped = true;
+          clearInterval(timer);
+        };
+      }, [lifecycle.outcome]);
+
+      // 动作一旦排定，旧页面的连接就注定先断掉；盖一层说清楚「它会自己回来」。
       const lifecycleOverlay = lifecycle.outcome === null || overlayDismissed
         ? null
         : h('div', { className: 'duc_overlay', key: 'overlay', role: 'alertdialog', 'aria-live': 'assertive' },
@@ -991,6 +1033,7 @@ window.__ModuleLoader__.load({
               lifecycle.outcome.action === 'stop' ? t('lifecycleOverlayStopTitle') : t('lifecycleOverlayRestartTitle')),
             h('div', { key: 'body' },
               lifecycle.outcome.action === 'stop' ? t('lifecycleOverlayStopBody') : t('lifecycleOverlayRestartBody')),
+            h('div', { className: 'duc_hint', key: 'hint' }, t('lifecycleOverlayHint')),
             h('div', { className: 'duc_actions', key: 'actions' }, h('button', {
               key: 'dismiss',
               type: 'button',
