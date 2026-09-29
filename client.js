@@ -153,6 +153,10 @@ window.__ModuleLoader__.load({
       lifecycleOverlayStopBody: 'The service has been stopped. Once you start the Harness again (double-click the "DeepSeek Harness" shortcut), this tab recovers by itself.',
       lifecycleOverlayHint: 'If it is still stuck after a few minutes, double-click the "DeepSeek Harness" shortcut on your desktop.',
       lifecycleOverlayDismiss: 'Got it',
+      lifecycleManualOpen: 'Reopen now',
+      lifecycleManualOpening: 'Opening…',
+      lifecycleManualNotReady: 'The service is not back yet — this tab recovers by itself once it is.',
+      lifecycleManualUnreachable: 'Still cannot reach the service (it may be restarting).',
       installSection: 'Install',
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
       command: 'Command',
@@ -251,6 +255,10 @@ window.__ModuleLoader__.load({
       lifecycleOverlayStopBody: '等你再次启动 Harness（双击桌面「DeepSeek Harness」）后，这个标签页会自己恢复。',
       lifecycleOverlayHint: '如果几分钟后它仍停在这里，双击桌面「DeepSeek Harness」。',
       lifecycleOverlayDismiss: '知道了',
+      lifecycleManualOpen: '立即重新打开',
+      lifecycleManualOpening: '正在打开…',
+      lifecycleManualNotReady: '服务还没起来 —— 等它起来后这个标签页会自己恢复。',
+      lifecycleManualUnreachable: '还连不上服务（可能仍在重启）。',
       installSection: '安装',
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
       command: '命令',
@@ -549,6 +557,39 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 手动恢复入口：问一次状态，拿到带令牌的地址就跳过去。
+     *
+     * 逻辑：自动轮询之外的第二条路。它只在用户点击时才发请求，因此不受任何定时器
+     * 或浏览器策略影响；服务还没起来时如实说「还没起来」，而不是装作在忙。
+     */
+    function useManualResume() {
+      const [pending, setPending] = React.useState(false);
+      // 失败原因是机器可读的标记，文案交给页面渲染（词典在页面那一侧）。
+      const [failure, setFailure] = React.useState(null);
+
+      const open = React.useCallback(async () => {
+        setPending(true);
+        try {
+          const body = await request('state', {
+            headers: { accept: 'application/json' },
+            cache: 'no-store',
+          });
+          if (typeof body?.loginUrl === 'string' && body.loginUrl !== '') {
+            window.location.replace(body.loginUrl);
+            return; // 页面即将离开，不必再改状态
+          }
+          setFailure('not-ready');
+        } catch {
+          setFailure('unreachable');
+        } finally {
+          setPending(false);
+        }
+      }, []);
+
+      return { pending, failure, open };
+    }
+
+    /**
      * 把时间戳渲染成本地可读文本；无时间戳时显示「从未」。
      * @param {number|undefined} value 毫秒时间戳。
      * @param {Function} t 翻译函数。
@@ -620,6 +661,7 @@ window.__ModuleLoader__.load({
       const { state, failure, busy, post } = useCenterState();
       const integrity = useIntegrity();
       const lifecycle = useLifecycle();
+      const manual = useManualResume();
       // 浮层只负责「告诉用户接下来去哪」，允许关掉。
       const [overlayDismissed, setOverlayDismissed] = React.useState(false);
       // 运行控制相关：能力来自 Host 对「本机有没有启动器/停止脚本」的探测。
@@ -1034,12 +1076,29 @@ window.__ModuleLoader__.load({
             h('div', { key: 'body' },
               lifecycle.outcome.action === 'stop' ? t('lifecycleOverlayStopBody') : t('lifecycleOverlayRestartBody')),
             h('div', { className: 'duc_hint', key: 'hint' }, t('lifecycleOverlayHint')),
-            h('div', { className: 'duc_actions', key: 'actions' }, h('button', {
-              key: 'dismiss',
-              type: 'button',
-              className: 'duc_button duc_buttonPrimary',
-              onClick: () => setOverlayDismissed(true),
-            }, t('lifecycleOverlayDismiss'))),
+            h('div', { className: 'duc_actions', key: 'actions' }, [
+              // 自动恢复之外再给一个手动入口：万一定时器在这台浏览器上没有跑起来，
+              // 用户至少还有一个「点一下就走」的确定路径。
+              h('button', {
+                key: 'manual',
+                type: 'button',
+                className: 'duc_button duc_buttonOutline',
+                disabled: manual.pending,
+                onClick: () => {
+                  void manual.open();
+                },
+              }, manual.pending ? t('lifecycleManualOpening') : t('lifecycleManualOpen')),
+              h('button', {
+                key: 'dismiss',
+                type: 'button',
+                className: 'duc_button duc_buttonPrimary',
+                onClick: () => setOverlayDismissed(true),
+              }, t('lifecycleOverlayDismiss')),
+            ]),
+            manual.failure === null
+              ? null
+              : h('div', { className: 'duc_hint duc_error', key: 'manualfail' },
+                manual.failure === 'not-ready' ? t('lifecycleManualNotReady') : t('lifecycleManualUnreachable')),
           ]));
 
       return h(React.Fragment, null, [
