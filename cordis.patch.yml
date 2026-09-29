@@ -1,0 +1,15 @@
+# bundle 补丁：把本插件的 Host 半边插进 profile 的组合树。
+#
+# 逻辑：dsh.bundle.patch 指向本文件，插件管理器安装时读取它并追加一行 Loader 条目。
+# id 必须唯一——它是补丁覆盖的寻址键，profile 的 cordis.patch.yml 用同一个 id
+# 覆盖 config，所以这个 id 不要改。
+#
+# 可用字段（全部可选，此处给出默认值作参考）：
+#   channel: latest            # latest | next，跟随哪个 npm dist-tag
+#   registry: https://registry.npmjs.org/
+#   autoCheck: true            # 后台自动检测是否有新版本
+#   autoInstall: false         # 检测到就自动安装（会替换全局包，默认关闭）
+#   checkIntervalHours: 6      # 自动检测频率
+- insert:
+    - id: dsh-update-center
+      name: '@local/dsh-update-center'

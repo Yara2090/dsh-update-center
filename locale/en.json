@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Updates & Version",
+    "description": "Checks the registry for a newer DeepSeek Harness release and installs it from Settings."
+  }
+}

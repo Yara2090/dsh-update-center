@@ -1,0 +1,516 @@
+/**
+ * 「更新与版本」设置页的浏览器半边。
+ *
+ * 用途：在 Harness Web 的设置面板里注册一个 settings.section 页面，展示
+ * 已安装版本与仓库上的版本，并允许用户检测和安装更新。
+ *
+ * 逻辑要点：
+ *   - 这是 dsh.client 的构建产物格式（window.__ModuleLoader__.load），必须
+ *     整份放在一个文件里；Node 侧的子模块拆分（lib/）不适用于浏览器半边。
+ *   - 只从浏览器模块表取 react，不 import 任何 Harness Client 包：那些包会
+ *     变，而这个页面崩溃会直接让 slot entry 变空。
+ *   - 数据来自 Host 的 /dsh-update-center 路由，同源 fetch，不带任何凭据。
+ *   - 检测/安装期间用 1s 轮询拉状态，其余时间完全不发请求。
+ */
+window.__ModuleLoader__.load({
+  id: '@local/dsh-update-center',
+  factory(require) {
+    const React = require('react');
+    const h = React.createElement;
+
+    /** 本插件拥有的词典命名空间；与 Host 无关，仅前端文案。 */
+    const NS = 'dshUpdateCenter';
+    /** Host 路由前缀，必须与 lib/center.js 的 ROUTE_PREFIX 一致。 */
+    const ENDPOINT = '/dsh-update-center';
+    /** 检测或安装进行中的轮询间隔。 */
+    const POLL_MS = 1000;
+
+    /**
+     * 依次尝试的路由基址。
+     *
+     * 逻辑：Harness 里应用自己的浏览器路由是「相对于当前文档」的，所以先取
+     * 文档所在目录；再退回根绝对路径。两者相同时会被去重，因此正常页面只会
+     * 发一次请求。
+     */
+    const BASES = (() => {
+      const candidates = [];
+      try {
+        candidates.push(new URL('dsh-update-center/', document.baseURI).pathname);
+      } catch {
+        /* 没有 document.baseURI 的环境直接落到绝对前缀 */
+      }
+      candidates.push(`${ENDPOINT}/`);
+      return candidates.filter((value, index) => candidates.indexOf(value) === index);
+    })();
+
+    /**
+     * 调用一个路由，直到某个基址返回 JSON。
+     *
+     * 逻辑：如果命中的是 SPA 兜底（返回 index.html），response.json() 会失败，
+     * 于是换下一个基址重试；只有拿到 JSON 才当作真正的应答。
+     * @param {string} pathname 前缀之下的路由名。
+     * @param {object} [init] fetch 选项。
+     * @returns {Promise<object>} 解码后的 JSON。
+     */
+    async function request(pathname, init) {
+      let failure;
+      for (const base of BASES) {
+        try {
+          const response = await fetch(`${base}${pathname}`, init);
+          const body = await response.json().catch(() => null);
+          if (body === null || typeof body !== 'object') {
+            failure = new Error(`no update service answered at ${base}${pathname}`);
+            continue;
+          }
+          if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : `HTTP ${String(response.status)}`);
+          return body;
+        } catch (error) {
+          failure = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+      throw failure ?? new Error('the update service is unreachable');
+    }
+
+    /** 英文文案。 */
+    const en = {
+      nav: 'Updates & Version',
+      title: 'Updates & Version',
+      description: 'Check the registry for a newer DeepSeek Harness release and install it from here.',
+      versionSection: 'Version',
+      currentVersion: 'Installed',
+      runningVersion: 'Running',
+      latestVersion: 'Available',
+      channel: 'Release channel',
+      channelLatest: 'Stable',
+      channelNext: 'Preview',
+      checking: 'Checking…',
+      unknown: 'Unknown',
+      upToDate: 'You are running the latest release.',
+      updateAvailable: 'A newer release is available.',
+      notChecked: 'Not checked yet.',
+      checkFailed: 'The registry could not be read',
+      checkNow: 'Check now',
+      updateNow: 'Install update',
+      installing: 'Installing…',
+      autoSection: 'Automatic detection',
+      autoCheck: 'Check automatically',
+      autoCheckHint: 'The Harness looks for a newer release in the background and reports it here.',
+      interval: 'Check every',
+      intervalHours: (hours) => `${hours} h`,
+      intervalDay: '24 h',
+      autoInstall: 'Install automatically',
+      autoInstallHint: 'Install a detected release without asking.',
+      autoInstallWarn: 'Risky: this replaces the global package. Turn it on only if an unattended install is acceptable; a restart is still required.',
+      lastChecked: 'Last check',
+      never: 'Never',
+      installSection: 'Install',
+      installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
+      command: 'Command',
+      log: 'Installer output',
+      restart: 'The new version is on disk. Restart the Harness to run it.',
+      installed: 'Install finished.',
+      installFailed: 'The installer did not finish successfully',
+      unavailable: 'The update service is not reachable. It is served over loopback only, so a remote browser cannot use this page.',
+      notLocated: 'The installed Harness package could not be located from the running process.',
+    };
+
+    /** 简体中文文案。 */
+    const zh = {
+      nav: '更新与版本',
+      title: '更新与版本',
+      description: '检查仓库中的 DeepSeek Harness 新版本，并在此直接安装。',
+      versionSection: '版本信息',
+      currentVersion: '已安装',
+      runningVersion: '运行中',
+      latestVersion: '最新版本',
+      channel: '更新通道',
+      channelLatest: '稳定版',
+      channelNext: '预览版',
+      checking: '检测中…',
+      unknown: '未知',
+      upToDate: '当前已是最新版本。',
+      updateAvailable: '发现新版本，可以更新。',
+      notChecked: '尚未检测。',
+      checkFailed: '无法读取版本仓库',
+      checkNow: '立即检查',
+      updateNow: '立即更新',
+      installing: '正在安装…',
+      autoSection: '自动检测',
+      autoCheck: '自动检测更新',
+      autoCheckHint: 'Harness 会在后台检查新版本，并在这里提示。',
+      interval: '检测频率',
+      intervalHours: (hours) => `${hours} 小时`,
+      intervalDay: '24 小时',
+      autoInstall: '自动安装更新',
+      autoInstallHint: '检测到新版本后直接安装，不再询问。',
+      autoInstallWarn: '有风险：这会替换全局安装包。确认可以接受无人值守安装再开启；装完仍需要重启。',
+      lastChecked: '上次检测',
+      never: '从未',
+      installSection: '安装',
+      installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
+      command: '命令',
+      log: '安装输出',
+      restart: '新版本已写入磁盘，重启 Harness 后生效。',
+      installed: '安装完成。',
+      installFailed: '安装未能成功完成',
+      unavailable: '无法访问更新服务。该服务只对本机回环地址开放，远程浏览器无法使用此页面。',
+      notLocated: '未能从当前进程定位已安装的 Harness 包。',
+    };
+
+    /**
+     * 页面样式。
+     *
+     * 逻辑：全部使用主题 token（--dsw-alias-*）而不是字面颜色，这样明暗主题
+     * 切换、主题换肤都自动跟随；类名统一加 duc_ 前缀避免和宿主样式打架。
+     * 作为 React 元素渲染，组件卸载时 style 标签一起消失，不留全局副作用。
+     */
+    const CSS = `
+.duc_page{display:flex;flex-direction:column;gap:16px;padding-top:20px;color:var(--dsw-alias-label-primary);font-size:14px;line-height:22px}
+.duc_head{display:flex;flex-direction:column;gap:4px}
+.duc_title{font-size:16px;font-weight:500;line-height:24px}
+.duc_desc{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
+.duc_card{border:0.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);padding:4px 16px 12px;display:flex;flex-direction:column}
+.duc_cardTitle{padding:12px 0 4px;font-weight:500}
+.duc_row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px}
+.duc_row+.duc_row{border-top:0.5px solid var(--dsw-alias-border-l1)}
+.duc_rowLabel{flex:1;min-width:0}
+.duc_rowValue{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.duc_rowStack{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.duc_hint{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
+.duc_status{display:flex;align-items:center;gap:6px;padding:8px 0 0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.duc_ok{color:var(--dsw-alias-state-success-primary)}
+.duc_warn{color:var(--dsw-alias-state-warn-primary)}
+.duc_error{color:var(--dsw-alias-state-error-primary)}
+.duc_actions{display:flex;align-items:center;gap:8px;padding-top:12px;flex-wrap:wrap}
+.duc_button{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:none;border-radius:var(--dsw-radius-md);cursor:pointer;font-family:inherit;font-size:14px;line-height:22px;height:36px;padding:0 14px;color:var(--dsw-alias-label-primary);background:transparent}
+.duc_button:disabled{cursor:not-allowed;opacity:0.4}
+.duc_buttonPrimary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}
+.duc_buttonPrimary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}
+.duc_buttonOutline{border:0.5px solid var(--dsw-alias-border-l3)}
+.duc_buttonOutline:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.duc_switch{box-sizing:border-box;position:relative;flex:0 0 auto;width:36px;height:20px;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
+.duc_switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary)}
+.duc_switch:disabled{cursor:default;opacity:0.5}
+.duc_thumb{display:block;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-primary-foreground);transition:transform 120ms ease}
+.duc_switch[aria-checked="true"] .duc_thumb{transform:translateX(16px)}
+.duc_segmented{display:inline-flex;gap:2px;padding:2px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2)}
+.duc_segment{border:0;background:transparent;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;line-height:18px;height:24px;padding:0 10px;border-radius:var(--dsw-radius-sm);cursor:pointer}
+.duc_segment:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.duc_segment:disabled{cursor:not-allowed;opacity:0.5}
+.duc_segmentActive{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}
+.duc_mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:16px}
+.duc_log{margin:8px 0 0;padding:8px 10px;max-height:200px;overflow:auto;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:16px;white-space:pre-wrap;word-break:break-all}
+`;
+
+    /**
+     * 一行「标签 + 右侧内容」。标签下有说明时竖排。
+     * @param {object} props label / hint / children。
+     */
+    function Row(props) {
+      return h('div', { className: 'duc_row' }, [
+        h('div', { className: props.hint === undefined ? 'duc_rowLabel' : 'duc_rowStack', key: 'label' }, [
+          h('div', { key: 'main' }, props.label),
+          props.hint === undefined ? null : h('div', { className: 'duc_hint', key: 'hint' }, props.hint),
+        ]),
+        h('div', { className: 'duc_rowValue', key: 'value' }, props.children),
+      ]);
+    }
+
+    /**
+     * 开关控件。
+     * 视觉状态直接绑定 aria-checked，保证屏幕阅读器读到的和看到的一致。
+     */
+    function Switch(props) {
+      return h('button', {
+        type: 'button',
+        role: 'switch',
+        'aria-checked': props.checked,
+        'aria-label': props.label,
+        className: 'duc_switch',
+        disabled: props.disabled === true,
+        onClick: () => props.onChange(!props.checked),
+      }, h('span', { className: 'duc_thumb' }));
+    }
+
+    /** 分段选择器：用于通道与检测频率这类少量互斥选项。 */
+    function Segmented(props) {
+      return h('div', { className: 'duc_segmented', role: 'group', 'aria-label': props.label },
+        props.options.map((option) => h('button', {
+          key: option.value,
+          type: 'button',
+          className: option.value === props.value ? 'duc_segment duc_segmentActive' : 'duc_segment',
+          'aria-pressed': option.value === props.value,
+          disabled: props.disabled === true,
+          onClick: () => props.onChange(option.value),
+        }, option.label)));
+    }
+
+    /**
+     * 读取 Host 状态，并给出页面需要的写入口。
+     *
+     * 逻辑：
+     *   - 进入页面先拉一次状态；
+     *   - 只有当「本地有待完成的操作」或「Host 正在检测/安装」时才开启 1s 轮询，
+     *     空闲时完全静默，不给后端制造无用请求。
+     */
+    function useCenterState() {
+      const [state, setState] = React.useState(null);
+      const [failure, setFailure] = React.useState(null);
+      const [pending, setPending] = React.useState(null);
+
+      const load = React.useCallback(async () => {
+        try {
+          const body = await request('state', {
+            headers: { accept: 'application/json' },
+            cache: 'no-store',
+          });
+          setState(body);
+          setFailure(null);
+        } catch (error) {
+          setFailure(error instanceof Error ? error.message : String(error));
+        }
+      }, []);
+
+      React.useEffect(() => {
+        void load();
+      }, [load]);
+
+      const busy = pending !== null || state?.checking === true || state?.updating === true;
+      React.useEffect(() => {
+        if (!busy) return undefined;
+        const timer = setInterval(() => {
+          void load();
+        }, POLL_MS);
+        return () => clearInterval(timer);
+      }, [busy, load]);
+
+      const post = React.useCallback(async (action, payload) => {
+        setPending(action);
+        try {
+          const body = await request(action, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload ?? {}),
+          });
+          setState(body);
+          setFailure(null);
+        } catch (error) {
+          setFailure(error instanceof Error ? error.message : String(error));
+        } finally {
+          setPending(null);
+          // 写完再拉一次，确保页面显示的是 Host 的真实状态而不是本地猜测。
+          void load();
+        }
+      }, [load]);
+
+      return { state, failure, busy, post };
+    }
+
+    /**
+     * 把时间戳渲染成本地可读文本；无时间戳时显示「从未」。
+     * @param {number|undefined} value 毫秒时间戳。
+     * @param {Function} t 翻译函数。
+     * @returns {string} 展示文本。
+     */
+    function formatCheckedAt(value, t) {
+      if (!Number.isFinite(value)) return t('never');
+      try {
+        return new Date(value).toLocaleString();
+      } catch {
+        return t('never');
+      }
+    }
+
+    /**
+     * 「更新与版本」页面本体。
+     * @param {object} props slot 注入的属性；t 来自注册时的 locale 命名空间。
+     */
+    function UpdateCenterPage(props) {
+      // t 正常由 slot 的 locale 选项注入；兜底走英文词典，避免极端情况下整页崩溃。
+      const t = typeof props.t === 'function' ? props.t : (key) => en[key] ?? key;
+      const { state, failure, busy, post } = useCenterState();
+
+      const currentVersion = state?.currentVersion;
+      const runningVersion = state?.runningVersion;
+      const latest = state?.latestVersion ?? (state?.checking === true ? t('checking') : t('unknown'));
+      const channel = state?.channel ?? 'latest';
+
+      // 状态行文案：按「连接失败 > 检测失败 > 检测中 > 定位失败 > 版本未知 > 有更新 > 已最新」判定。
+      // 顺序很重要：读不到当前版本时绝不能显示「已是最新」。
+      let statusText = t('notChecked');
+      let statusClass = 'duc_status';
+      if (failure !== null) {
+        statusText = `${t('unavailable')} (${failure})`;
+        statusClass = 'duc_status duc_error';
+      } else if (state?.checkError != null) {
+        statusText = `${t('checkFailed')}：${String(state.checkError)}`;
+        statusClass = 'duc_status duc_error';
+      } else if (state?.checking === true) {
+        statusText = t('checking');
+      } else if (state?.currentVersionError != null) {
+        statusText = t('notLocated');
+        statusClass = 'duc_status duc_warn';
+      } else if (currentVersion === undefined) {
+        statusText = t('notChecked');
+      } else if (state?.updateAvailable === true) {
+        statusText = t('updateAvailable');
+        statusClass = 'duc_status duc_warn';
+      } else if (typeof state?.latestVersion === 'string') {
+        statusText = t('upToDate');
+        statusClass = 'duc_status duc_ok';
+      }
+
+      const header = h('div', { className: 'duc_head', key: 'head' }, [
+        h('div', { className: 'duc_title', key: 'title' }, t('title')),
+        h('div', { className: 'duc_desc', key: 'desc' }, t('description')),
+      ]);
+
+      const versionCard = h('div', { className: 'duc_card', key: 'version' }, [
+        h('div', { className: 'duc_cardTitle', key: 'title' }, t('versionSection')),
+        h(Row, { key: 'current', label: t('currentVersion') }, h('span', { className: 'duc_mono' }, String(currentVersion ?? t('unknown')))),
+        // 更新安装完成后磁盘版本会变，而进程仍是旧代码，这一行把两者摊开说明。
+        runningVersion !== undefined && currentVersion !== undefined && runningVersion !== currentVersion
+          ? h(Row, { key: 'running', label: t('runningVersion') }, h('span', { className: 'duc_mono' }, String(runningVersion)))
+          : null,
+        h(Row, { key: 'latest', label: t('latestVersion') }, h('span', { className: 'duc_mono' }, String(latest))),
+        h(Row, { key: 'channel', label: t('channel') }, h(Segmented, {
+          label: t('channel'),
+          value: channel,
+          disabled: busy,
+          options: [
+            { value: 'latest', label: t('channelLatest') },
+            { value: 'next', label: t('channelNext') },
+          ],
+          onChange: (value) => {
+            void post('settings', { channel: value });
+          },
+        })),
+        // aria-live：检测/安装结果异步到达，读屏用户需要被通知到。
+        h('div', { className: statusClass, key: 'status', role: 'status', 'aria-live': 'polite' }, statusText),
+        h(Row, { key: 'checkedAt', label: t('lastChecked') }, h('span', {}, formatCheckedAt(state?.checkedAt, t))),
+        h('div', { className: 'duc_actions', key: 'actions' }, [
+          h('button', {
+            key: 'check',
+            type: 'button',
+            className: 'duc_button duc_buttonOutline',
+            disabled: busy,
+            onClick: () => {
+              void post('check', { channel });
+            },
+          }, t('checkNow')),
+          h('button', {
+            key: 'update',
+            type: 'button',
+            className: 'duc_button duc_buttonPrimary',
+            // 只有确知「有新版且当前不在忙」时才允许点，避免无意义的安装。
+            disabled: busy || state?.updateAvailable !== true,
+            onClick: () => {
+              void post('update', { channel });
+            },
+          }, state?.updating === true ? t('installing') : t('updateNow')),
+        ]),
+      ]);
+
+      const autoCard = h('div', { className: 'duc_card', key: 'auto' }, [
+        h('div', { className: 'duc_cardTitle', key: 'title' }, t('autoSection')),
+        h(Row, {
+          key: 'toggle',
+          label: t('autoCheck'),
+          hint: t('autoCheckHint'),
+        }, h(Switch, {
+          label: t('autoCheck'),
+          // 状态未到达前按默认值展示；Host 默认开启自动检测。
+          checked: state?.autoCheck !== false,
+          disabled: state === null,
+          onChange: (value) => {
+            void post('settings', { autoCheck: value });
+          },
+        })),
+        h(Row, { key: 'interval', label: t('interval') }, h(Segmented, {
+          label: t('interval'),
+          value: String(state?.checkIntervalHours ?? 6),
+          // 关掉自动检测后频率没有意义，一并禁用。
+          disabled: state?.autoCheck === false,
+          options: [
+            { value: '1', label: t('intervalHours')(1) },
+            { value: '6', label: t('intervalHours')(6) },
+            { value: '12', label: t('intervalHours')(12) },
+            { value: '24', label: t('intervalDay') },
+          ],
+          onChange: (value) => {
+            void post('settings', { checkIntervalHours: Number(value) });
+          },
+        })),
+        h(Row, {
+          key: 'autoInstall',
+          label: t('autoInstall'),
+          hint: t('autoInstallHint'),
+        }, h(Switch, {
+          label: t('autoInstall'),
+          checked: state?.autoInstall === true,
+          // 自动安装依赖自动检测，检测关掉时这个开关没有意义。
+          disabled: state === null || state.autoCheck === false,
+          onChange: (value) => {
+            void post('settings', { autoInstall: value });
+          },
+        })),
+        state?.autoInstall === true
+          ? h('div', { className: 'duc_status duc_warn', key: 'warn' }, t('autoInstallWarn'))
+          : null,
+      ]);
+
+      const installCard = h('div', { className: 'duc_card', key: 'install' }, [
+        h('div', { className: 'duc_cardTitle', key: 'title' }, t('installSection')),
+        h('div', { className: 'duc_hint', key: 'hint' }, t('installHint')),
+        h(Row, { key: 'command', label: t('command') }, h('span', { className: 'duc_mono' },
+          state?.installCommand ?? `npm install --global ${state?.packageName ?? '@deepseek-ai/dsh'}@${state?.latestVersion ?? '<version>'}`)),
+        state?.restartRequired === true
+          ? h('div', { className: 'duc_status duc_warn', key: 'restart' }, t('restart'))
+          : null,
+        state?.updateResult?.ok === true && state?.restartRequired !== true
+          ? h('div', { className: 'duc_status duc_ok', key: 'done' }, t('installed'))
+          : null,
+        state?.updateResult != null && state.updateResult.ok !== true
+          ? h('div', { className: 'duc_status duc_error', key: 'failed' },
+            `${t('installFailed')}${state.updateResult.exitCode === undefined ? '' : ` (exit ${String(state.updateResult.exitCode)})`}${state.updateResult.error === undefined ? '' : `：${String(state.updateResult.error)}`}`)
+          : null,
+        Array.isArray(state?.updateOutput) && state.updateOutput.length > 0
+          ? h('div', { key: 'logWrap' }, [
+            h('div', { className: 'duc_hint', key: 'logTitle' }, t('log')),
+            h('pre', { className: 'duc_log', key: 'log' }, state.updateOutput.join('\n')),
+          ])
+          : null,
+      ]);
+
+      return h(React.Fragment, null, [
+        h('style', { key: 'css' }, CSS),
+        h('div', { className: 'duc_page', key: 'page' }, [header, versionCard, autoCard, installCard]),
+      ]);
+    }
+
+    /** 本插件需要的服务：没有它们就没有插槽和文案。 */
+    const inject = ['slots', 'locale'];
+
+    /**
+     * 注册设置页。
+     * @param {object} ctx 浏览器插件上下文。
+     */
+    function apply(ctx) {
+      const t = ctx.locale.bind(NS);
+      // 词典注册在 effect 里，插件卸载时自动移除。
+      ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-update-center: dictionaries');
+      // settings.section 由设置外壳声明；外壳尚未挂载时 inject 会等它出现。
+      ctx.effect(() => ctx.slots.inject('settings.section', () => ctx.slots.register({
+        name: 'settings.section',
+        id: 'updates',
+        // order 12：排在「模型」(10) 之后、「插件」(15) 之前。
+        order: 12,
+        // label 用 thunk，切换语言时会重新求值，不需要重新注册。
+        label: () => t('nav'),
+        locale: NS,
+      }, UpdateCenterPage)), 'dsh-update-center: settings page');
+    }
+
+    return { inject, apply };
+  },
+});

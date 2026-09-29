@@ -1,0 +1,14 @@
+# 本插件自身没有任何运行时依赖，node_modules 只可能是本地误装产生的。
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+
+# 运行期落盘的偏好文件（真实位置在 <DSH_HOME>/dsh-update-center.json）。
+dsh-update-center.json
+*.log
+
+# 编辑器与系统产物
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
