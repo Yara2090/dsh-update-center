@@ -138,6 +138,11 @@ window.__ModuleLoader__.load({
       lifecycleFailed: 'The action could not be scheduled',
       lifecycleLastOk: (action) => `Last "${action}": the helper process started.`,
       lifecycleLastFailed: (error) => `The last action never ran: ${error}`,
+      lifecycleLastDone: (action, at) => `Last "${action}" was carried out at ${at}.`,
+      lifecycleStopEffect: 'Stop: the service shuts down and does NOT come back. Reopen it with the "DeepSeek Harness" shortcut on your desktop.',
+      lifecycleRestartEffect: 'Restart: stops and starts again (about 10 s), then opens a fresh tab with a new sign-in link. Use this after installing an update.',
+      lifecycleAfterStop: 'The page will keep showing "connecting" — that is expected, the service is gone. Double-click the "DeepSeek Harness" shortcut on your desktop to open it again.',
+      lifecycleAfterRestart: 'The page disconnects for about 10 s. If no new tab appears, double-click the "DeepSeek Harness" shortcut on your desktop.',
       installSection: 'Install',
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
       command: 'Command',
@@ -225,6 +230,11 @@ window.__ModuleLoader__.load({
       lifecycleFailed: '动作没有安排成功',
       lifecycleLastOk: (action) => `上次「${action}」：启动器子进程已成功拉起。`,
       lifecycleLastFailed: (error) => `上次动作根本没有跑起来：${error}`,
+      lifecycleLastDone: (action, at) => `上次「${action}」已于 ${at} 执行。`,
+      lifecycleStopEffect: '停止：服务就此关掉，不会自己回来。要再打开，双击桌面的「DeepSeek Harness」快捷方式。',
+      lifecycleRestartEffect: '重启：自动停掉再起来（约 10 秒），完成后弹出带新登录链接的标签页。装完更新后用这个。',
+      lifecycleAfterStop: '页面会一直显示「连接中」——这是正常的，服务已经不在了。双击桌面「DeepSeek Harness」即可重新打开。',
+      lifecycleAfterRestart: '页面会断开约 10 秒。若没有自动弹出新标签页，双击桌面「DeepSeek Harness」。',
       installSection: '安装',
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
       command: '命令',
@@ -276,6 +286,9 @@ window.__ModuleLoader__.load({
 .duc_buttonPrimary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}
 .duc_buttonOutline{border:0.5px solid var(--dsw-alias-border-l3)}
 .duc_buttonOutline:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+/* 停止是不可逆的那一个：用错误色描边，让它和重启在视觉上就不会被看混。 */
+.duc_buttonDanger{border:0.5px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}
+.duc_buttonDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .duc_switch{box-sizing:border-box;position:relative;flex:0 0 auto;width:36px;height:20px;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
 .duc_switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary)}
 .duc_switch:disabled{cursor:default;opacity:0.5}
@@ -591,11 +604,11 @@ window.__ModuleLoader__.load({
       const stopReady = lifecycleState?.canStop === true;
       const restartReady = lifecycleState?.canRestart === true;
       const controlBusy = lifecycle.pending !== null || lifecycle.outcome !== null;
-      /** 生成一个「点两次确认」的按钮。 */
-      const controlButton = (action, baseLabel, confirmLabel, ready, missingLabel) => h('button', {
+      /** 生成一个「点两次确认」的按钮；variant 决定它的配色（停止用错误色以示不可逆）。 */
+      const controlButton = (action, baseLabel, confirmLabel, ready, missingLabel, variant) => h('button', {
         key: action,
         type: 'button',
-        className: 'duc_button duc_buttonOutline',
+        className: `duc_button ${variant}`,
         disabled: !ready || controlBusy,
         title: ready ? undefined : missingLabel,
         onClick: () => {
@@ -790,7 +803,7 @@ window.__ModuleLoader__.load({
             t('restart'),
             // 既然装了新版本就是要重启，索性把按钮放在这句话旁边，少一步来回。
             restartReady && !controlBusy
-              ? controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), true, '')
+              ? controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), true, '', 'duc_buttonPrimary')
               : null,
           ])
           : null,
@@ -893,11 +906,29 @@ window.__ModuleLoader__.load({
       ]);
 
       // 运行控制：说清「关浏览器 ≠ 停服务」，并把真的停/重启放进来。
+      // 两个按钮的差别必须写在点之前——点下去之后页面就只剩「连接中」，
+      // 那时候再解释已经晚了。
+      const armedEffect = lifecycle.armed === 'stop'
+        ? t('lifecycleAfterStop')
+        : (lifecycle.armed === 'restart' ? t('lifecycleAfterRestart') : null);
+      const scheduledEffect = lifecycle.outcome === null
+        ? null
+        : (lifecycle.outcome.action === 'stop' ? t('lifecycleAfterStop') : t('lifecycleAfterRestart'));
+      const lastAction = state?.lifecycleLast;
+      const lastActionName = lastAction === undefined
+        ? ''
+        : (lastAction.action === 'stop' ? t('lifecycleStop') : t('lifecycleRestart'));
       const lifecycleCard = h('div', { className: 'duc_card', key: 'lifecycle' }, [
         h('div', { className: 'duc_cardTitle', key: 'title' }, t('lifecycleSection')),
         h('div', { className: 'duc_hint', key: 'hint' }, t('lifecycleHint')),
+        // 两个动作各自会发生什么，常驻显示。
+        h('div', { className: 'duc_hint', key: 'stopEffect' }, t('lifecycleStopEffect')),
+        h('div', { className: 'duc_hint', key: 'restartEffect' }, t('lifecycleRestartEffect')),
         lifecycle.failure !== null
           ? h('div', { className: 'duc_status duc_error', key: 'fail' }, `${t('lifecycleFailed')}：${lifecycle.failure}`)
+          : null,
+        armedEffect !== null
+          ? h('div', { className: 'duc_status duc_warn', key: 'armed', role: 'status', 'aria-live': 'polite' }, armedEffect)
           : null,
         lifecycle.outcome !== null
           ? h('div', {
@@ -905,27 +936,32 @@ window.__ModuleLoader__.load({
             key: 'scheduled',
             role: 'status',
             'aria-live': 'polite',
-          }, (lifecycle.outcome.action === 'stop' ? t('lifecycleScheduledStop') : t('lifecycleScheduledRestart'))(
-            Math.round((lifecycle.outcome.delayMs ?? 2000) / 1000),
-          ))
+          }, [
+            (lifecycle.outcome.action === 'stop' ? t('lifecycleScheduledStop') : t('lifecycleScheduledRestart'))(
+              Math.round((lifecycle.outcome.delayMs ?? 2000) / 1000),
+            ),
+            scheduledEffect === null ? null : h('div', { key: 'after' }, scheduledEffect),
+          ])
           : null,
         stopReady ? null : h('div', { className: 'duc_hint', key: 'nostop' },
           t('lifecycleMissingStop')(String(lifecycleState?.stopper ?? ''))),
         restartReady ? null : h('div', { className: 'duc_hint', key: 'norestart' },
           t('lifecycleMissingRestart')(String(lifecycleState?.launcher ?? ''))),
         // 上一次动作的真实结果。「点了没反应」之所以难查，就是因为没人告诉你
-        // 那个子进程到底起来没有——现在这里会直说。
-        state?.lifecycleLast === undefined || lifecycle.outcome !== null
+        // 那个子进程到底起来没有——现在这里会直说，而且跨重启保留。
+        lastAction === undefined || lifecycle.outcome !== null
           ? null
           : h('div', {
-            className: state.lifecycleLast.ok === true ? 'duc_status duc_ok' : 'duc_status duc_error',
+            className: lastAction.ok === false ? 'duc_status duc_error' : 'duc_status duc_ok',
             key: 'last',
-          }, state.lifecycleLast.ok === true
-            ? t('lifecycleLastOk')(state.lifecycleLast.action === 'stop' ? t('lifecycleStop') : t('lifecycleRestart'))
-            : t('lifecycleLastFailed')(String(state.lifecycleLast.error ?? ''))),
+          }, lastAction.ok === false
+            ? t('lifecycleLastFailed')(String(lastAction.error ?? ''))
+            : (lastAction.ok === true
+              ? t('lifecycleLastOk')(lastActionName)
+              : t('lifecycleLastDone')(lastActionName, formatCheckedAt(lastAction.at, t)))),
         h('div', { className: 'duc_actions', key: 'actions' }, [
-          controlButton('stop', t('lifecycleStop'), t('lifecycleConfirmStop'), stopReady, String(lifecycleState?.stopper ?? '')),
-          controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), restartReady, String(lifecycleState?.launcher ?? '')),
+          controlButton('stop', t('lifecycleStop'), t('lifecycleConfirmStop'), stopReady, String(lifecycleState?.stopper ?? ''), 'duc_buttonDanger'),
+          controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), restartReady, String(lifecycleState?.launcher ?? ''), 'duc_buttonPrimary'),
         ]),
       ]);
 
