@@ -103,6 +103,28 @@ window.__ModuleLoader__.load({
       autoInstallWarn: 'Risky: this replaces the global package. Turn it on only if an unattended install is acceptable; a restart is still required.',
       lastChecked: 'Last check',
       never: 'Never',
+      integritySection: 'Integrity',
+      integrityHint: 'Checks the files, links and settings this plugin needs, and fixes what can be fixed safely.',
+      integrityOk: 'Everything checks out.',
+      integrityIssues: (errors, repairable) => `${errors} problem${errors === 1 ? '' : 's'} found${repairable > 0 ? `, ${repairable} can be fixed automatically` : ''}.`,
+      integrityUnavailable: 'The integrity check could not run',
+      integrityCheck: 'Check integrity',
+      integrityRepair: 'Fix automatically',
+      integrityRepairing: 'Repairing…',
+      integrityFixed: (count) => `Repaired ${count} item${count === 1 ? '' : 's'}.`,
+      integrityFixFailed: 'Some repairs did not succeed',
+      integrityNothingToFix: 'Nothing here can be repaired automatically — follow the details above.',
+      integrityRestart: 'The plugin registration changed. Restart the Harness to apply it.',
+      ck_plugin_files: 'Plugin files',
+      ck_manifest: 'Manifest',
+      ck_module_graph: 'Source dependencies',
+      ck_client_bundle: 'Browser bundle',
+      ck_profile_registration: 'Profile registration',
+      ck_profile_link: 'Profile link',
+      ck_state_file: 'Preferences file',
+      ck_home_writable: 'Harness home writable',
+      ck_node_version: 'Node version',
+      ck_dsh_install: 'Harness installation',
       installSection: 'Install',
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
       command: 'Command',
@@ -155,6 +177,28 @@ window.__ModuleLoader__.load({
       autoInstallWarn: '有风险：这会替换全局安装包。确认可以接受无人值守安装再开启；装完仍需要重启。',
       lastChecked: '上次检测',
       never: '从未',
+      integritySection: '完整性检查',
+      integrityHint: '检查本插件运行所需的文件、链接与配置是否齐全，能安全修的可以直接修好。',
+      integrityOk: '一切正常。',
+      integrityIssues: (errors, repairable) => `发现 ${errors} 项问题${repairable > 0 ? `，其中 ${repairable} 项可自动修复` : ''}。`,
+      integrityUnavailable: '完整性检查未能执行',
+      integrityCheck: '检查完整性',
+      integrityRepair: '一键修复',
+      integrityRepairing: '正在修复…',
+      integrityFixed: (count) => `已修复 ${count} 项。`,
+      integrityFixFailed: '有修复项没有成功',
+      integrityNothingToFix: '这里没有可自动修复的问题，请按上面的说明手工处理。',
+      integrityRestart: '插件注册信息有改动，重启 Harness 后生效。',
+      ck_plugin_files: '插件文件',
+      ck_manifest: '插件清单',
+      ck_module_graph: '源码依赖',
+      ck_client_bundle: '浏览器半边',
+      ck_profile_registration: 'profile 注册',
+      ck_profile_link: 'profile 链接',
+      ck_state_file: '偏好文件',
+      ck_home_writable: 'DSH 主目录可写',
+      ck_node_version: 'Node 版本',
+      ck_dsh_install: 'Harness 安装',
       installSection: '安装',
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
       command: '命令',
@@ -222,6 +266,11 @@ window.__ModuleLoader__.load({
 .duc_stats{display:flex;flex-wrap:wrap;gap:2px 16px;padding-top:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .duc_statsItem{white-space:nowrap}
 .duc_statsValue{color:var(--dsw-alias-label-primary)}
+.duc_checks{display:flex;flex-direction:column;padding-top:6px}
+.duc_check{display:flex;align-items:baseline;gap:8px;padding:2px 0;font-size:12px;line-height:18px}
+.duc_checkMark{flex:0 0 auto;width:12px;font-weight:600}
+.duc_checkName{flex:0 0 auto;color:var(--dsw-alias-label-primary)}
+.duc_checkDetail{flex:1;min-width:0;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;overflow-wrap:anywhere}
 @keyframes duc_slide{0%{left:-35%}100%{left:100%}}
 /* 前庭敏感的用户不该被迫盯着一条来回滑动的亮条：改成静态满宽提示。 */
 @media (prefers-reduced-motion: reduce){.duc_progressBar{animation:none;left:0;width:100%;opacity:0.6}}
@@ -333,6 +382,72 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 读取自检报告，并给出重新检查与一键修复的入口。
+     *
+     * 逻辑：进页面就查一次（纯磁盘只读，代价很小）；修复是唯一会写磁盘的动作，
+     * 因此只有用户点按钮才发生，修复后直接用返回的新报告替换旧结论。
+     */
+    function useIntegrity() {
+      const [report, setReport] = React.useState(null);
+      const [failure, setFailure] = React.useState(null);
+      const [pending, setPending] = React.useState(null);
+      const [outcome, setOutcome] = React.useState(null);
+
+      const check = React.useCallback(async () => {
+        setPending('check');
+        try {
+          const body = await request('integrity', {
+            headers: { accept: 'application/json' },
+            cache: 'no-store',
+          });
+          setReport(body);
+          setFailure(null);
+        } catch (error) {
+          setFailure(error instanceof Error ? error.message : String(error));
+        } finally {
+          setPending(null);
+        }
+      }, []);
+
+      const repair = React.useCallback(async () => {
+        setPending('repair');
+        try {
+          const body = await request('repair', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+          });
+          setReport(body.report ?? null);
+          setOutcome(body);
+          setFailure(null);
+        } catch (error) {
+          setFailure(error instanceof Error ? error.message : String(error));
+        } finally {
+          setPending(null);
+        }
+      }, []);
+
+      React.useEffect(() => {
+        void check();
+      }, [check]);
+
+      return { report, failure, pending, outcome, check, repair };
+    }
+
+    /**
+     * 把检查项 id 映射成本地化名称；词典里没有这一项时退回 id 本身，
+     * 这样 Host 新增检查项不会让页面出现空白。
+     * @param {Function} t 翻译函数。
+     * @param {string} id 检查项 id。
+     * @returns {string} 展示名称。
+     */
+    function checkLabel(t, id) {
+      const key = `ck_${String(id).replace(/-/g, '_')}`;
+      const value = t(key);
+      return typeof value === 'string' && value !== key ? value : String(id);
+    }
+
+    /**
      * 把时间戳渲染成本地可读文本；无时间戳时显示「从未」。
      * @param {number|undefined} value 毫秒时间戳。
      * @param {Function} t 翻译函数。
@@ -402,6 +517,7 @@ window.__ModuleLoader__.load({
       // t 正常由 slot 的 locale 选项注入；兜底走英文词典，避免极端情况下整页崩溃。
       const t = typeof props.t === 'function' ? props.t : (key) => en[key] ?? key;
       const { state, failure, busy, post } = useCenterState();
+      const integrity = useIntegrity();
 
       const currentVersion = state?.currentVersion;
       const runningVersion = state?.runningVersion;
@@ -604,9 +720,87 @@ window.__ModuleLoader__.load({
           : null,
       ]);
 
+      // 完整性卡片：把「插件还完整吗」变成一份看得懂的清单，可修时给一个按钮。
+      const integrityReport = integrity.report;
+      const integritySummary = integrityReport?.summary;
+      let integrityStatusText = t('integrityOk');
+      let integrityStatusClass = 'duc_status duc_ok';
+      if (integrity.failure !== null) {
+        integrityStatusText = `${t('integrityUnavailable')} (${integrity.failure})`;
+        integrityStatusClass = 'duc_status duc_error';
+      } else if (integrityReport === null) {
+        integrityStatusText = t('checking');
+        integrityStatusClass = 'duc_status';
+      } else if (integritySummary.errors > 0) {
+        integrityStatusText = t('integrityIssues')(integritySummary.errors, integritySummary.repairable);
+        integrityStatusClass = 'duc_status duc_error';
+      } else if (integritySummary.warnings > 0) {
+        integrityStatusText = t('integrityIssues')(integritySummary.warnings, integritySummary.repairable);
+        integrityStatusClass = 'duc_status duc_warn';
+      }
+
+      /** 三种状态的记号；用文字符号而不是图标字体，避免多一份资源依赖。 */
+      const MARKS = { ok: '✓', warn: '!', error: '✕' };
+      const failedRepairs = integrity.outcome === null
+        ? []
+        : integrity.outcome.repaired.filter((entry) => !entry.ok);
+      const integrityCard = h('div', { className: 'duc_card', key: 'integrity' }, [
+        h('div', { className: 'duc_cardTitle', key: 'title' }, t('integritySection')),
+        h('div', { className: 'duc_hint', key: 'hint' }, t('integrityHint')),
+        h('div', {
+          className: integrityStatusClass,
+          key: 'status',
+          role: 'status',
+          'aria-live': 'polite',
+        }, integrityStatusText),
+        integrityReport === null ? null : h('div', { className: 'duc_checks', key: 'checks' },
+          integrityReport.checks.map((item) => h('div', { className: 'duc_check', key: item.id }, [
+            h('span', { className: `duc_checkMark duc_${item.status}`, key: 'mark' }, MARKS[item.status] ?? item.status),
+            h('span', { className: 'duc_checkName', key: 'name' }, checkLabel(t, item.id)),
+            // 通过的项目不必展示细节，失败时把路径/原因摆出来才有用。
+            item.status === 'ok'
+              ? null
+              : h('span', { className: 'duc_checkDetail', key: 'detail' }, String(item.detail ?? '')),
+          ]))),
+        failedRepairs.length > 0
+          ? h('div', { className: 'duc_status duc_error', key: 'fixfail' },
+            `${t('integrityFixFailed')}：${failedRepairs.map((entry) => `${entry.id}（${entry.error ?? ''}）`).join('；')}`)
+          : null,
+        integrity.outcome !== null && failedRepairs.length === 0 && integrity.outcome.repairedCount > 0
+          ? h('div', { className: 'duc_status duc_ok', key: 'fixed' }, t('integrityFixed')(integrity.outcome.repairedCount))
+          : null,
+        integrity.outcome !== null && integrity.outcome.repairedCount === 0 && failedRepairs.length === 0
+          ? h('div', { className: 'duc_hint', key: 'nothing' }, t('integrityNothingToFix'))
+          : null,
+        integrity.outcome?.restartRequired === true
+          ? h('div', { className: 'duc_status duc_warn', key: 'restart' }, t('integrityRestart'))
+          : null,
+        h('div', { className: 'duc_actions', key: 'actions' }, [
+          h('button', {
+            key: 'check',
+            type: 'button',
+            className: 'duc_button duc_buttonOutline',
+            disabled: integrity.pending !== null,
+            onClick: () => {
+              void integrity.check();
+            },
+          }, t('integrityCheck')),
+          h('button', {
+            key: 'repair',
+            type: 'button',
+            className: 'duc_button duc_buttonPrimary',
+            // 没有可自动修复的项时按钮就该是灰的，免得变成「点了没反应」。
+            disabled: integrity.pending !== null || (integritySummary?.repairable ?? 0) === 0,
+            onClick: () => {
+              void integrity.repair();
+            },
+          }, integrity.pending === 'repair' ? t('integrityRepairing') : t('integrityRepair')),
+        ]),
+      ]);
+
       return h(React.Fragment, null, [
         h('style', { key: 'css' }, CSS),
-        h('div', { className: 'duc_page', key: 'page' }, [header, versionCard, autoCard, installCard]),
+        h('div', { className: 'duc_page', key: 'page' }, [header, versionCard, integrityCard, autoCard, installCard]),
       ]);
     }
 

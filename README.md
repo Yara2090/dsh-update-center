@@ -1,20 +1,24 @@
 # dsh-update-center
 
 给 **DeepSeek Harness** Web 设置面板加一个「**更新与版本**」页面：显示当前安装的
-`@deepseek-ai/dsh` 版本、自动检测仓库上的新版本，并可以一键装到同一个全局目录。
+`@deepseek-ai/dsh` 版本、自动检测仓库上的新版本、一键装到同一个全局目录，并且能
+**自检插件的完整性**（文件、依赖、配置）并在缺东西时一键修复。
 
 > 一个 DSH Cordis 插件（Host + Client 双半边），纯 JavaScript，无构建步骤、无运行时依赖。
 
 English summary: an "Updates & Version" settings page for the DeepSeek Harness Web GUI.
 It reads the running `@deepseek-ai/dsh` version, checks the npm registry for a newer
-release on a selectable channel, and installs it into the same global prefix. Plain
-ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
+release on a selectable channel, and installs it into the same global prefix. It also
+self-checks its own installation (files, links, settings) and repairs the parts that can
+be repaired safely. Plain ESM, no bundler, no runtime dependencies; the browser half only
+imports `react`.
 
 ---
 
 ## 目录
 
 - [界面与功能](#界面与功能)
+- [完整性检查与一键修复](#完整性检查与一键修复)
 - [工作原理](#工作原理)
 - [HTTP 接口](#http-接口)
 - [安装](#安装)
@@ -35,6 +39,7 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 | 卡片 | 内容 |
 |---|---|
 | **版本信息** | 已安装版本、最新版本（按通道）、更新通道切换（稳定版 / 预览版）、状态行、上次检测时间、「立即检查」、「立即更新」 |
+| **完整性检查** | 10 项自检结果（文件 / 依赖 / 配置 / 运行环境）、「检查完整性」、「一键修复」 |
 | **自动检测** | 自动检测开关、检测频率（1 / 6 / 12 / 24 小时）、自动安装开关（默认关闭，开启时给出风险提示） |
 | **安装** | 将执行的完整命令、**安装进度**（不确定进度条 + 已用时长 / 已下载字节 / 速率 / 已取包数）、安装输出实时回显、安装结果与总耗时、以及「需要重启才生效」的提示 |
 
@@ -64,6 +69,36 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 
 安装命令因此带上了 `--loglevel=http`（pnpm 用 `--reporter=append-only`），让安装器在管道里也开口说话。
 
+## 完整性检查与一键修复
+
+插件由三部分组成：**插件目录里的文件**、**profile 里的注册与链接**、**运行环境的配置**。
+任何一处缺了，表现出来的都是「页面不见了」或「点了没反应」，很难从现象反推原因。
+这一页把三部分逐项查一遍，并把其中能安全修的修掉。
+
+十项检查（进入页面时自动跑一次，纯磁盘只读）：
+
+| 检查项 | 查什么 | 一键修复 |
+|---|---|---|
+| 插件文件 | 清单声明的入口、图标、语言包等是否都在 | — |
+| 插件清单 | `package.json` 能否解析，`name` / `version` / `dsh.bundle.patch` / `dsh.client` 是否齐全 | — |
+| 源码依赖 | 顺着相对导入走一遍宿主半边，用到的文件是否都存在；有没有依赖没随插件交付的外部包 | — |
+| 浏览器半边 | `client.js` 是否完整（含模块加载标记） | — |
+| profile 注册 | profile 清单里的依赖项与 `dsh.profile.bundles` 是否都指向本插件 | ✅ 补回缺失项（先备份） |
+| profile 链接 | `node_modules/@local/dsh-update-center` 是否存在且指向插件目录 | ✅ 重建链接（只删链接，绝不碰它指向的目录） |
+| 偏好文件 | `<DSH_HOME>/dsh-update-center.json` 是否还是合法 JSON | ✅ 用当前设置重写（先备份） |
+| DSH 主目录可写 | 状态与偏好需要落盘的地方是否可写 | ✅ 创建目录 |
+| Node 版本 | 是否 ≥ 20 | — |
+| Harness 安装 | 能否定位全局安装的 `@deepseek-ai/dsh` | — |
+
+几条刻意的规矩：
+
+- **检查永远只读**，只有点「一键修复」才写磁盘，而且每一项都**先备份**（同名 `.bak`）。
+- **修复只补不删**：往 profile 清单里补缺失的依赖项与 bundle 条目，绝不动用户已有的其它内容，
+  因此反复点也不会越改越乱（幂等）。
+- **不确定就不动手**：链接位置如果是普通目录，脚本不会去删它——那可能是别人手工拷贝的一份
+  插件（提示「是拷贝而不是链接」），也可能是别的东西占了名字（报错并让人工处理）。
+- **修完把新的自检结果一并返回**，页面直接显示修好之后的样子，而不是让用户再点一次检查。
+
 
 ## 工作原理
 
@@ -76,6 +111,7 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 ┌───────────────────────────▼────────────────────────────┐
 │  index.js  → ctx.webServer.register(prefix)            │
 │  lib/center.js   状态机 / 路由 / 自动检测 / 安装子进程   │
+│  lib/integrity.js 自检与修复：文件、链接、注册、环境      │
 │  lib/progress.js 进度信号：缓存体积、抓取计数、静默判定   │
 │  lib/semver.js   版本解析与 semver 优先级比较            │
 │  lib/installation.js  定位安装目录、探测包管理器         │
@@ -84,7 +120,7 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 
 - **Host 半边**（`index.js` + `lib/`）持有三件浏览器拿不到的事实：本机安装的版本、
   注册表发布的版本、以及「把新版装上去」的能力。它注册一条前缀路由
-  `/dsh-update-center`，并把状态、检查、偏好、安装四个动作暴露成 JSON。
+  `/dsh-update-center`，并把状态、检查、偏好、安装、自检、修复六个动作暴露成 JSON。
 - **Client 半边**（`client.js`）只从浏览器模块表取 `react`，不 import 任何 Harness
   Client 包——那些包会随版本变化，而这个页面崩溃会让整个 slot entry 变空。
 - **偏好落盘**到 `<DSH_HOME>/dsh-update-center.json`（通道、自动检测、自动安装、频率、
@@ -101,6 +137,8 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 | `POST` | `/dsh-update-center/check` | 查注册表；可带 `{"channel":"latest"\|"next"}`；等检测完成再返回 |
 | `POST` | `/dsh-update-center/settings` | 写偏好，字段 `channel` / `autoCheck` / `autoInstall` / `checkIntervalHours` |
 | `POST` | `/dsh-update-center/update` | 启动安装；立即返回，进度靠轮询 `/state` |
+| `GET` | `/dsh-update-center/integrity` | 跑一次完整性自检（只读），返回检查报告 |
+| `POST` | `/dsh-update-center/repair` | 修复可自动处理的项，返回动作清单与**修复后**的新报告 |
 
 状态对象的主要字段：
 
@@ -120,35 +158,59 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 | `restartRequired` | 是否已装上磁盘但还没重启 |
 | `channels` / `statePath` | 允许的通道列表 / 偏好文件路径 |
 
+自检报告（`/integrity` 与 `/repair` 共用同一形状）：
+
+| 字段 | 含义 |
+|---|---|
+| `pluginRoot` / `pluginName` / `profileDir` / `statePath` | 本次自检认定的插件目录 / 包名 / profile 目录（判定不出为 `null`）/ 偏好文件 |
+| `summary` | `errors` / `warnings` / `repairable` / `total` 计数 |
+| `checks[]` | 每项为 `{ id, status, repairable, detail }`；`status` 取 `ok` / `warn` / `error` |
+| `/repair` 额外返回 | `repaired[]`（含每项的 `ok` 与说明）、`repairedCount`、`failedCount`、`restartRequired`、以及修复后的 `report` |
+
 ## 安装
 
-本仓库是插件源码，不是 npm 包，因此从本地目录装进某个 profile：
+三步，两分钟。前提：已经装好 **Node ≥ 20** 和 **DeepSeek Harness**。
 
-1. 克隆到本地任意目录：
+### 第 1 步：下载到本地
 
-   ```powershell
-   git clone https://github.com/<你的账号>/dsh-update-center.git
-   ```
+```powershell
+git clone https://github.com/Yara2090/dsh-update-center.git C:\dsh\dsh-update-center
+```
 
-2. 让 Harness 把该目录作为 bundle 装进目标 profile。在 DSH 里最直接的方式是调用
-   插件管理器的 `install_bundle`，`target` 指向克隆下来的绝对路径：
+放哪儿都行，下面统一按 `C:\dsh\dsh-update-center` 写。
 
-   ```
-   plugin_manager(action: "install_bundle", target: "C:\\path\\to\\dsh-update-center")
-   ```
+### 第 2 步：装进 Harness（两种方式，任选一种）
 
-   它会完成 pnpm 依赖安装、把包名写进 `dsh.profile.bundles`，并在支持热加载时立即生效。
+**方式 A：让 Harness 自己装（推荐）**——在 Harness 的对话框里说一句：
 
-3. 手动等价做法（不使用插件管理器时）：
+> 把 `C:\dsh\dsh-update-center` 装成插件
 
-   ```powershell
-   dsh plugin --profile web add "file:C:\path\to\dsh-update-center"
-   # 然后编辑 ~/.dsh/profiles/web/package.json，
-   # 把 "@local/dsh-update-center" 追加到 dsh.profile.bundles
-   dsh --profile web --dump-config   # 确认它出现在组合树里
-   ```
+助手会调用插件管理器把安装做完：装好依赖、写进 profile 的 bundle 列表，支持热加载时立即生效。
 
-4. 重启 Harness（或让它热加载），打开 **设置 → 更新与版本**。
+**方式 B：自己敲命令**
+
+```powershell
+dsh plugin --profile web add "file:C:\dsh\dsh-update-center"
+```
+
+这条命令只装依赖；还要让插件真正启用，得把它写进 profile 的 bundle 列表——
+打开 `~/.dsh/profiles/web/package.json`，在 `dsh.profile.bundles` 里加上一行
+`"@local/dsh-update-center"`。
+
+### 第 3 步：重启 Harness，打开「设置 → 更新与版本」
+
+看到这个页面就装好了。
+
+### 出问题时
+
+| 现象 | 多半是 | 怎么办 |
+|---|---|---|
+| 设置里找不到「更新与版本」 | 第 2 步的 bundle 列表没写进去，插件压根没被加载 | 按方式 B 的说明检查 `dsh.profile.bundles`，或者直接用方式 A 重装一次 |
+| 页面在，但卡片里报问题 | 链接断了、偏好文件坏了、插件目录被搬走了 | 点「一键修复」，能补的它会补，补不了的会说明要你做什么 |
+| 浏览器打不开这个页面 | 它只对本机回环地址开放 | 在跑 Harness 的那台机器上打开 |
+| 提示找不到 `dsh` 命令 | Harness 还没全局安装 | `npm i -g @deepseek-ai/dsh` |
+
+装好之后基本不用管：默认每 6 小时自动查一次新版本，有新版就在这个页面里提示。
 
 ## 配置
 
@@ -175,7 +237,7 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 无需安装依赖、无需构建：
 
 ```powershell
-node --test                  # 41 个用例：版本比较 + 进度信号 + 路由/状态/拒绝分支
+node --test                  # 65 个用例：版本比较 + 进度信号 + 自检与修复 + 路由/状态/拒绝分支
 node --check index.js        # 语法检查（client.js / lib/*.js 同理）
 ```
 
@@ -200,12 +262,14 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 ├── client.js             浏览器半边：单文件，settings.section 页面
 ├── lib/
 │   ├── center.js         状态机、HTTP 路由、自动检测、安装子进程与进度心跳
+│   ├── integrity.js      自检与一键修复：文件、源码依赖、profile 注册与链接、偏好文件
 │   ├── progress.js       进度信号：缓存体积、抓取计数、静默判定（纯函数）
 │   ├── semver.js         版本解析与 semver 优先级比较（纯函数）
 │   └── installation.js   定位安装目录、探测包管理器、拼装安装命令
 ├── test/
 │   ├── semver.test.js    版本比较的边界用例
 │   ├── progress.test.js  进度信号与安装命令的边界用例
+│   ├── integrity.test.js 自检判定与修复安全性（含「不误删真实目录」）
 │   └── center.test.js    路由 / 状态 / 拒绝分支
 ├── locale/
 │   ├── zh.json           插件卡片的中文显示名与描述
@@ -225,6 +289,9 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 - **同时只跑一个安装**：检测与安装互相排斥，重复请求返回 `409`。
 - **插件卸载即收尾**：路由、定时器、正在运行的安装子进程都由 `ctx.effect` 的清理函数一起释放。
 - **更新仍需重启**：安装只换磁盘上的文件，新版本要重启 Harness 才真正生效。
+- **修复的写权限**：只有「一键修复」会写磁盘，范围仅限 profile 清单（补依赖项与 bundle 条目）、
+  profile 里的插件链接、以及偏好文件；每项都先写同名 `.bak` 备份，且只补缺失、不删用户内容。
+  检查（`GET /integrity`）永远只读。
 
 ## 已知限制
 
@@ -239,10 +306,30 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 - npm 在解包阶段会连续几分钟不输出任何东西，此时进度条只靠时间与缓存体积证明进程还活着；
   真正「卡住」与「正在解包」在外部无法彻底区分，超过 90 秒静默时界面会给出说明而不是结论。
 - 桌面（Electron）版的更新走 Harness 自带通道，与本插件无关。
+- **一键修复只覆盖「能安全补回来」的部分**：插件源码文件丢了、Node 版本太低、Harness 没装，
+  这些只能重新克隆仓库或自行升级，页面会如实说明而不是假装修好。
+- 修复改的是 profile 清单与链接，因此改完之后**需要重启 Harness** 才生效（页面会提示）。
+- 自检报告的文案由浏览器半边渲染，Host 只回 `id` 与细节字符串；因此新增检查项时忘记补文案，
+  页面会退回显示检查项 id，而不是空白。
 - 没有浏览器控制的环境下无法验证视觉呈现；本项目的验证覆盖语法、清单、Host 路由与
   实时 Client 插槽注册。
 
 ## 更新日志
+
+### 1.2.0
+
+- **新增「完整性检查」**：10 项自检覆盖插件文件、清单、源码依赖、浏览器半边、
+  profile 注册与链接、偏好文件、DSH 主目录可写性、Node 版本与 Harness 安装。
+  进入设置页自动跑一次，也可随时点「检查完整性」重跑。
+- **新增「一键修复」**：补回 profile 清单里缺失的依赖项与 bundle 条目、重建插件链接、
+  重写损坏的偏好文件、创建缺失的 DSH 主目录。每项先备份（`.bak`），只补不删，且幂等。
+- **修复的安全边界写进代码**：链接位置若是普通目录，区分「拷贝进来的一份插件」（警告）与
+  「别的东西占了名字」（报错），两种情况都不自动删除；重建链接时只删链接本身，
+  绝不触碰它指向的真实目录（有专门的用例守着这条）。
+- 链接判定改用 `realpath`：Windows 的目录联接在 Node 里 `isSymbolicLink()` 为假、
+  `isDirectory()` 为真，只看该标志会把 pnpm 的联接与手工修复的结果误判成普通目录。
+- README 的安装说明重写为三步，并补了「出问题时」对照表。
+- 新增 `lib/integrity.js` 与 `test/integrity.test.js`（用例总数 43 → 65）。
 
 ### 1.1.0
 

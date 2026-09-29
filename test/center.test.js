@@ -98,11 +98,19 @@ describe('更新面板路由', () => {
   let home;
   let registry;
   let center;
+  let savedProfileDir;
+  let savedProfile;
 
   before(async () => {
     // 把偏好文件重定向到临时目录，测试绝不碰用户真实的 ~/.dsh。
     home = mkdtempSync(path.join(tmpdir(), 'dsh-update-center-test-'));
     process.env.DSH_HOME = home;
+    // 自检与「一键修复」会按 profile 目录去读写插件注册信息，测试里必须把它掐掉，
+    // 否则跑一次用例就可能改到开发者自己正在用的 profile。
+    savedProfileDir = process.env.DSH_PROFILE_DIR;
+    savedProfile = process.env.DSH_PROFILE;
+    delete process.env.DSH_PROFILE_DIR;
+    delete process.env.DSH_PROFILE;
     registry = await startFakeRegistry();
     center = createUpdateCenter({ registry: registry.origin, checkIntervalHours: 1 });
   });
@@ -111,6 +119,8 @@ describe('更新面板路由', () => {
     center.dispose();
     await new Promise((resolve) => registry.server.close(resolve));
     delete process.env.DSH_HOME;
+    if (savedProfileDir !== undefined) process.env.DSH_PROFILE_DIR = savedProfileDir;
+    if (savedProfile !== undefined) process.env.DSH_PROFILE = savedProfile;
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -204,6 +214,28 @@ describe('更新面板路由', () => {
     const unknown = await invoke(center, { method: 'POST', url: `${ROUTE_PREFIX}/nope`, body: '{}' });
     assert.equal(unknown.status, 404);
     assert.match(String(unknown.body.error), /nope/);
+  });
+
+  it('GET /integrity 返回自检报告', async () => {
+    const { status, body } = await invoke(center, { url: `${ROUTE_PREFIX}/integrity` });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(typeof body.checkedAt, 'number');
+    assert.ok(Array.isArray(body.checks));
+    // 至少要有文件检查；profile 相关项在缺 DSH_PROFILE_DIR 时是「无法判定」而不是失败。
+    assert.ok(body.checks.some((check) => check.id === 'plugin-files'));
+    assert.equal(typeof body.summary.repairable, 'number');
+  });
+
+  it('POST /repair 返回修复动作与修复后的报告', async () => {
+    const { status, body } = await invoke(center, { method: 'POST', url: `${ROUTE_PREFIX}/repair`, body: '{}' });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.ok(Array.isArray(body.repaired));
+    assert.equal(typeof body.repairedCount, 'number');
+    assert.equal(typeof body.report.checkedAt, 'number');
+    // 测试环境里没有 profile 目录，因此不该产生任何写动作。
+    assert.equal(body.repairedCount, 0);
   });
 });
 
