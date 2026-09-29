@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-update-center",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Updates & Version settings page for the DeepSeek Harness Web GUI: detects a newer @deepseek-ai/dsh release and installs it.",
@@ -34,7 +34,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:single": "node --test --test-isolation=none"
   },
   "dsh": {
     "bundle": {

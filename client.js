@@ -107,6 +107,15 @@ window.__ModuleLoader__.load({
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
       command: 'Command',
       log: 'Installer output',
+      progress: 'Install progress',
+      elapsed: 'Elapsed',
+      downloaded: 'Downloaded',
+      rateLabel: 'Rate',
+      fetched: 'Fetched',
+      packages: (count) => `${count} package${count === 1 ? '' : 's'}`,
+      stalled: (seconds) => `No new output for ${seconds} s. npm prints nothing while it downloads or unpacks a large package, so this is expected — as long as no error shows up below, the install is still running.`,
+      installingHint: 'Keep this plugin enabled while it installs: disabling or reloading it terminates the installer.',
+      totalTime: 'Total time',
       restart: 'The new version is on disk. Restart the Harness to run it.',
       installed: 'Install finished.',
       installFailed: 'The installer did not finish successfully',
@@ -150,6 +159,15 @@ window.__ModuleLoader__.load({
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
       command: '命令',
       log: '安装输出',
+      progress: '安装进度',
+      elapsed: '已用时',
+      downloaded: '已下载',
+      rateLabel: '速率',
+      fetched: '已取',
+      packages: (count) => `${count} 个包`,
+      stalled: (seconds) => `已有 ${seconds} 秒没有新输出。npm 在下载大压缩包或解包阶段本来就不输出任何东西，这属于正常现象——只要下面没有出现报错，安装就还在继续。`,
+      installingHint: '安装期间请让本插件保持启用：禁用或重载它会直接终止安装进程。',
+      totalTime: '总耗时',
       restart: '新版本已写入磁盘，重启 Harness 后生效。',
       installed: '安装完成。',
       installFailed: '安装未能成功完成',
@@ -199,6 +217,14 @@ window.__ModuleLoader__.load({
 .duc_segment:disabled{cursor:not-allowed;opacity:0.5}
 .duc_segmentActive{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}
 .duc_mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:16px}
+.duc_progress{position:relative;height:4px;margin:12px 0 0;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}
+.duc_progressBar{position:absolute;top:0;left:-35%;height:100%;width:35%;border-radius:999px;background:var(--dsw-alias-brand-primary);animation:duc_slide 1.4s ease-in-out infinite}
+.duc_stats{display:flex;flex-wrap:wrap;gap:2px 16px;padding-top:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.duc_statsItem{white-space:nowrap}
+.duc_statsValue{color:var(--dsw-alias-label-primary)}
+@keyframes duc_slide{0%{left:-35%}100%{left:100%}}
+/* 前庭敏感的用户不该被迫盯着一条来回滑动的亮条：改成静态满宽提示。 */
+@media (prefers-reduced-motion: reduce){.duc_progressBar{animation:none;left:0;width:100%;opacity:0.6}}
 .duc_log{margin:8px 0 0;padding:8px 10px;max-height:200px;overflow:auto;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:16px;white-space:pre-wrap;word-break:break-all}
 `;
 
@@ -319,6 +345,53 @@ window.__ModuleLoader__.load({
       } catch {
         return t('never');
       }
+    }
+
+    /**
+     * 把毫秒渲染成 `分:秒`（超过一小时才补上小时段）。
+     *
+     * 逻辑：已用时长是安装期间唯一「永远在动」的数字，所以宁可粗糙也要一直刷新；
+     * 用 tabular-nums 对齐后，秒数跳动不会带动整行抖动。
+     * @param {number|undefined} ms 毫秒。
+     * @returns {string} 展示文本；非法输入显示破折号。
+     */
+    function formatDuration(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return '—';
+      const total = Math.floor(ms / 1000);
+      const seconds = total % 60;
+      const minutes = Math.floor(total / 60) % 60;
+      const hours = Math.floor(total / 3600);
+      const tail = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+      return hours > 0 ? `${hours}:${tail}` : `${minutes}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    /**
+     * 把字节数渲染成 MB / GB。
+     * @param {number|undefined} bytes 字节数。
+     * @returns {string|null} 展示文本；未知时为 null，调用方据此整项不显示。
+     */
+    function formatBytes(bytes) {
+      if (!Number.isFinite(bytes) || bytes < 0) return null;
+      const mb = bytes / (1024 * 1024);
+      return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
+    }
+
+    /**
+     * 把字节/秒渲染成速率。
+     * @param {number|undefined} bytesPerSecond 每秒字节数。
+     * @returns {string|null} 展示文本；为 0 或未知时返回 null。
+     */
+    function formatRate(bytesPerSecond) {
+      if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return null;
+      return bytesPerSecond >= 1024 * 1024
+        ? `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`
+        : `${Math.max(1, Math.round(bytesPerSecond / 1024))} KB/s`;
+    }
+
+    /** 一个统计项：「标签 + 值」。 */
+    function Stat(props) {
+      return h('span', { className: 'duc_statsItem' }, `${props.label} `,
+        h('span', { className: 'duc_statsValue' }, props.value));
     }
 
     /**
@@ -459,11 +532,55 @@ window.__ModuleLoader__.load({
           : null,
       ]);
 
+      // 安装进度：npm 在管道里完全静默，所以页面得自己造出「还在动」的证据——
+      // 时间是心跳，字节只在真的下载时增长，两者都比一句「正在安装…」诚实。
+      const progressStats = [];
+      if (state?.updating === true) {
+        progressStats.push(h(Stat, {
+          key: 'elapsed',
+          label: t('elapsed'),
+          value: formatDuration(state?.updateElapsedMs),
+        }));
+        const downloaded = formatBytes(state?.updateCacheBytes);
+        if (downloaded !== null) {
+          progressStats.push(h(Stat, { key: 'downloaded', label: t('downloaded'), value: downloaded }));
+        }
+        const rate = formatRate(state?.updateCacheRate);
+        if (rate !== null) {
+          progressStats.push(h(Stat, { key: 'rate', label: t('rateLabel'), value: rate }));
+        }
+        if ((state?.updatePackageCount ?? 0) > 0) {
+          progressStats.push(h(Stat, {
+            key: 'packages',
+            label: t('fetched'),
+            value: t('packages')(state.updatePackageCount),
+          }));
+        }
+      }
+
       const installCard = h('div', { className: 'duc_card', key: 'install' }, [
         h('div', { className: 'duc_cardTitle', key: 'title' }, t('installSection')),
         h('div', { className: 'duc_hint', key: 'hint' }, t('installHint')),
         h(Row, { key: 'command', label: t('command') }, h('span', { className: 'duc_mono' },
           state?.installCommand ?? `npm install --global ${state?.packageName ?? '@deepseek-ai/dsh'}@${state?.latestVersion ?? '<version>'}`)),
+        state?.updating === true
+          ? h('div', { key: 'progress' }, [
+            // 百分比需要知道总下载量，而 npm 不给；因此是「不确定进度」条 + 真实数字，
+            // 而不是一个编出来的百分数。
+            h('div', {
+              className: 'duc_progress',
+              key: 'bar',
+              role: 'progressbar',
+              'aria-label': t('progress'),
+            }, h('div', { className: 'duc_progressBar' })),
+            progressStats.length === 0 ? null : h('div', { className: 'duc_stats', key: 'stats' }, progressStats),
+            state?.updateStalled === true
+              ? h('div', { className: 'duc_status duc_warn', key: 'stalled' },
+                t('stalled')(Math.max(1, Math.round((state?.updateSilentMs ?? 0) / 1000))))
+              : null,
+            h('div', { className: 'duc_hint', key: 'hold' }, t('installingHint')),
+          ])
+          : null,
         state?.restartRequired === true
           ? h('div', { className: 'duc_status duc_warn', key: 'restart' }, t('restart'))
           : null,
@@ -473,6 +590,11 @@ window.__ModuleLoader__.load({
         state?.updateResult != null && state.updateResult.ok !== true
           ? h('div', { className: 'duc_status duc_error', key: 'failed' },
             `${t('installFailed')}${state.updateResult.exitCode === undefined ? '' : ` (exit ${String(state.updateResult.exitCode)})`}${state.updateResult.error === undefined ? '' : `：${String(state.updateResult.error)}`}`)
+          : null,
+        // 装完之后进度条收起来，但总耗时留着——下次遇到「怎么这么久」时有据可查。
+        state?.updateResult != null && Number.isFinite(state?.updateElapsedMs)
+          ? h('div', { className: 'duc_stats', key: 'timing' },
+            h(Stat, { label: t('totalTime'), value: formatDuration(state.updateElapsedMs) }))
           : null,
         Array.isArray(state?.updateOutput) && state.updateOutput.length > 0
           ? h('div', { key: 'logWrap' }, [

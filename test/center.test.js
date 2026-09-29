@@ -124,6 +124,12 @@ describe('更新面板路由', () => {
     assert.equal(body.autoCheck, true);
     assert.equal(body.autoInstall, false);
     assert.equal(typeof body.statePath, 'string');
+    // 进度字段必须稳定出现在快照里：页面在没有它们时会退回「一片安静」的老样子。
+    assert.equal(body.updating, false);
+    assert.equal(body.updateElapsedMs, 0);
+    assert.equal(body.updateFetchCount, 0);
+    assert.equal(body.updatePackageCount, 0);
+    assert.equal(body.updateStalled, false);
   });
 
   it('POST /settings 写入偏好并落盘', async () => {

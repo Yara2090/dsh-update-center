@@ -23,6 +23,7 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 - [目录结构](#目录结构)
 - [安全边界](#安全边界)
 - [已知限制](#已知限制)
+- [更新日志](#更新日志)
 - [许可](#许可)
 
 ---
@@ -35,7 +36,7 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 |---|---|
 | **版本信息** | 已安装版本、最新版本（按通道）、更新通道切换（稳定版 / 预览版）、状态行、上次检测时间、「立即检查」、「立即更新」 |
 | **自动检测** | 自动检测开关、检测频率（1 / 6 / 12 / 24 小时）、自动安装开关（默认关闭，开启时给出风险提示） |
-| **安装** | 将执行的完整命令、安装输出实时回显、安装结果、以及「需要重启才生效」的提示 |
+| **安装** | 将执行的完整命令、**安装进度**（不确定进度条 + 已用时长 / 已下载字节 / 速率 / 已取包数）、安装输出实时回显、安装结果与总耗时、以及「需要重启才生效」的提示 |
 
 几个刻意的行为：
 
@@ -44,6 +45,25 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 - **不自动降级**：本机跑预发布版、仓库 `latest` 还是更旧的稳定版时，判定为「无更新」。
 - **更新完成但未重启时**，页面同时列出「已安装」和「运行中」两个版本，说明磁盘上已经是新版、进程里仍是旧代码。
 - **空闲时零请求**：只有检测或安装进行中才以 1s 轮询状态，其余时间页面完全不访问后端。
+- **不编造百分比**：npm 不告诉调用者「总共要下多少」，所以进度条是不确定态，旁边给的是
+  真实数字（时间、字节、速率、包数），而不是一个看起来精确、实际瞎猜的百分数。
+
+### 安装期间看得见什么
+
+`npm install --global` 的进度条只在 TTY 下画；输出被父进程用管道接走之后它一个字都不吐，
+调试日志也要等进程结束才落盘。结果是「正在下载 100 MB」和「已经卡死」在页面上长得一模一样。
+
+这个面板用四条互相独立的信号把它拆开：
+
+| 信号 | 来源 | 说明 |
+|---|---|---|
+| 已用时长 | 1s 心跳（Host 侧） | 只要进程活着就一直在走 |
+| 已下载 / 速率 | 直接量 npm 下载缓存 `_cacache/content-v2` 的体积 | **静默下载大压缩包时唯一还会增长的信号** |
+| 已取包数 | `--loglevel=http` 打出的 `npm http fetch` 行 | 只在真的拿到应答时增加 |
+| 静默提示 | 上述活动时间距现在超过 90 秒 | 给一句「npm 在下载/解包阶段本来就不输出」的说明，而不是假装一切正常 |
+
+安装命令因此带上了 `--loglevel=http`（pnpm 用 `--reporter=append-only`），让安装器在管道里也开口说话。
+
 
 ## 工作原理
 
@@ -56,6 +76,7 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 ┌───────────────────────────▼────────────────────────────┐
 │  index.js  → ctx.webServer.register(prefix)            │
 │  lib/center.js   状态机 / 路由 / 自动检测 / 安装子进程   │
+│  lib/progress.js 进度信号：缓存体积、抓取计数、静默判定   │
 │  lib/semver.js   版本解析与 semver 优先级比较            │
 │  lib/installation.js  定位安装目录、探测包管理器         │
 └────────────────────────────────────────────────────────┘
@@ -91,6 +112,10 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
 | `updateAvailable` | 是否确实有更新（`false` 也包含「无法判定」） |
 | `checking` / `checkedAt` / `checkError` | 检测中 / 上次检测时间 / 检测错误（无错误为 `null`） |
 | `updating` / `updateOutput` / `updateResult` | 安装中 / 安装输出 / 安装结果 |
+| `updateStartedAt` / `updateElapsedMs` / `updateFinishedAt` | 安装开始时间 / 已用毫秒（心跳刷新，结束即冻结） / 结束时间 |
+| `updateCacheBytes` / `updateCacheRate` | 已下载字节（npm 缓存实量，估算值） / 字节每秒 |
+| `updateFetchCount` / `updatePackageCount` | 已完成的注册表抓取次数 / 其中的压缩包数 |
+| `updateSilentMs` / `updateStalled` | 距上次活动的毫秒数 / 是否已静默超过 90 秒 |
 | `installCommand` | 将执行（或已执行）的完整命令 |
 | `restartRequired` | 是否已装上磁盘但还没重启 |
 | `channels` / `statePath` | 允许的通道列表 / 偏好文件路径 |
@@ -134,29 +159,31 @@ ESM, no bundler, no runtime dependencies; the browser half only imports `react`.
   name: "@local/dsh-update-center"
   config:
     channel: latest            # latest | next，默认 latest
-    registry: "https://registry.npmjs.org/"   # 可换成内网镜像
+    registry: "https://registry.npmjs.org/"   # 检测与安装都用的源，可换成内网镜像
     autoCheck: true            # 后台自动检测，默认 true
     autoInstall: false         # 检测到就自动安装，默认 false
     checkIntervalHours: 6      # 自动检测频率，默认 6
 ```
 
 界面上能改的只有 `channel` / `autoCheck` / `autoInstall` / `checkIntervalHours`，
-它们会落到偏好文件里并覆盖这里的默认值；`registry` 只在配置里生效。
+它们会落到偏好文件里并覆盖这里的默认值；`registry` 只能在配置里改，并且**检测与安装
+用的是同一个源**（安装命令会带上 `--registry=<地址>`）。这样换成内网镜像后，检测到的
+新版本也真的能从镜像装下来，不会出现「检测到有新版本、安装却从另一个源拉不到」。
 
 ## 开发与测试
 
 无需安装依赖、无需构建：
 
 ```powershell
-node --test                  # 25 个用例：版本比较 + 路由/状态/拒绝分支
+node --test                  # 41 个用例：版本比较 + 进度信号 + 路由/状态/拒绝分支
 node --check index.js        # 语法检查（client.js / lib/*.js 同理）
 ```
 
 如果运行环境禁止 Node 测试运行器 fork 子进程（沙箱会报 `spawn EPERM`），
-改用单进程模式并显式列出文件：
+改用单进程模式：
 
 ```powershell
-node --test --test-isolation=none test/semver.test.js test/center.test.js
+npm run test:single          # 等价于 node --test --test-isolation=none
 ```
 
 测试不访问外网：注册表由本地假 HTTP 服务提供，偏好文件写在临时目录里，
@@ -172,11 +199,13 @@ node --test --test-isolation=none test/semver.test.js test/center.test.js
 ├── index.js              Host 半边入口：inject + apply，只做挂载
 ├── client.js             浏览器半边：单文件，settings.section 页面
 ├── lib/
-│   ├── center.js         状态机、HTTP 路由、自动检测、安装子进程管理
+│   ├── center.js         状态机、HTTP 路由、自动检测、安装子进程与进度心跳
+│   ├── progress.js       进度信号：缓存体积、抓取计数、静默判定（纯函数）
 │   ├── semver.js         版本解析与 semver 优先级比较（纯函数）
 │   └── installation.js   定位安装目录、探测包管理器、拼装安装命令
 ├── test/
 │   ├── semver.test.js    版本比较的边界用例
+│   ├── progress.test.js  进度信号与安装命令的边界用例
 │   └── center.test.js    路由 / 状态 / 拒绝分支
 ├── locale/
 │   ├── zh.json           插件卡片的中文显示名与描述
@@ -205,9 +234,34 @@ node --test --test-isolation=none test/semver.test.js test/center.test.js
   执行界面上展示的那条命令。
 - Windows 上正在运行的进程可能占住原生模块文件，导致全局安装失败；界面会把安装器的
   原始输出原样显示出来，按提示手动执行即可。
+- **安装期间不要让本插件被卸载或重载**：插件被卸载时会一并终止正在运行的安装子进程
+  （这是「不留孤儿 npm」的代价）。界面在安装中会常驻这条提示。
+- npm 在解包阶段会连续几分钟不输出任何东西，此时进度条只靠时间与缓存体积证明进程还活着；
+  真正「卡住」与「正在解包」在外部无法彻底区分，超过 90 秒静默时界面会给出说明而不是结论。
 - 桌面（Electron）版的更新走 Harness 自带通道，与本插件无关。
 - 没有浏览器控制的环境下无法验证视觉呈现；本项目的验证覆盖语法、清单、Host 路由与
   实时 Client 插槽注册。
+
+## 更新日志
+
+### 1.1.0
+
+- **新增安装进度反馈**：不确定进度条 + 已用时长、已下载字节、下载速率、已取包数。
+  这些数字由 1 秒心跳刷新，因此 npm 完全静默时页面依然在动，不再出现「点了立即更新
+  之后一片安静」。
+- **新增静默提示**：活动（输出或字节增长）中断超过 90 秒时给出明确说明，而不是让
+  用户对着一个不动的按钮猜是卡了还是慢。
+- **安装命令带 `--loglevel=http`**（pnpm 用 `--reporter=append-only`），让安装在管道里
+  也有输出；同时加上 `--no-audit --no-fund` 减少无关网络往返。
+- **安装与检测共用配置里的 `registry`**：安装命令现在会带上 `--registry=<地址>`。
+  此前它只影响检测，配了镜像的用户装的时候仍走官方源。
+- **安装结束后保留总耗时**，便于判断某次升级是否异常。
+- 修掉一处子进程 `error` 事件被后续 `close` 覆盖的问题（启动失败的原因不再丢失）。
+- 新增 `lib/progress.js` 与 `test/progress.test.js`（用例总数 25 → 41）。
+
+### 1.0.0
+
+- 首个版本：版本信息卡片、通道切换、自动检测、自动安装开关、一键更新与安装输出回显。
 
 ## 许可
 
