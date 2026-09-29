@@ -237,6 +237,20 @@ describe('更新面板路由', () => {
     // 测试环境里没有 profile 目录，因此不该产生任何写动作。
     assert.equal(body.repairedCount, 0);
   });
+
+  it('缺启动器脚本时拒绝停止与重启，并说明缺了什么', async () => {
+    // 测试环境的 DSH_HOME 是临时目录，里面没有启动器脚本，因此这里走拒绝分支：
+    // 既验证了判定，也保证用例绝不会真的去停掉谁的服务。
+    const stop = await invoke(center, { method: 'POST', url: `${ROUTE_PREFIX}/stop`, body: '{}' });
+    assert.equal(stop.status, 409);
+    assert.equal(stop.body.ok, false);
+    assert.match(String(stop.body.error), /停止脚本/);
+
+    const restart = await invoke(center, { method: 'POST', url: `${ROUTE_PREFIX}/restart`, body: '{}' });
+    assert.equal(restart.status, 409);
+    assert.equal(restart.body.ok, false);
+    assert.match(String(restart.body.error), /启动器脚本/);
+  });
 });
 
 describe('isLoopbackRequest', () => {

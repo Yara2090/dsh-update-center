@@ -27,6 +27,7 @@ import { after, describe, it } from 'node:test';
 
 import {
   checkIntegrity,
+  discoverProfileDir,
   extractImportSpecifiers,
   manifestFilePaths,
   normalizePath,
@@ -180,6 +181,58 @@ describe('自检用到的纯函数', () => {
     assert.equal(normalized.includes('\\'), false);
     assert.equal(normalized.endsWith('/'), false);
     if (process.platform === 'win32') assert.equal(normalized, normalized.toLowerCase());
+  });
+});
+
+describe('discoverProfileDir', () => {
+  it('宿主进程里没有 profile 环境变量时，靠链接反推出来', async () => {
+    // 这是生产环境的真实情况：DSH_PROFILE_DIR / DSH_PROFILE 是注入给工具子进程的，
+    // 宿主进程自己一个都没有，因此判定必须落到磁盘证据上。
+    const { root, home, profileDir } = makeWorkspace();
+    const found = await discoverProfileDir({
+      env: { DSH_HOME: home },
+      pluginName: PLUGIN_NAME,
+      pluginRoot: root,
+    });
+    assert.equal(found, profileDir);
+  });
+
+  it('链接被删掉后，仍能从清单里的 bundle 条目认出是哪个 profile', async () => {
+    // 认不出 profile 的话，「缺链接」就没法一键修复——这正是它存在的意义。
+    const { root, home, profileDir, linkPath } = makeWorkspace();
+    removeLinkForTest(linkPath);
+    const found = await discoverProfileDir({
+      env: { DSH_HOME: home },
+      pluginName: PLUGIN_NAME,
+      pluginRoot: root,
+    });
+    assert.equal(found, profileDir);
+  });
+
+  it('无关的 profile 不会被选中', async () => {
+    const { root, home, profileDir } = makeWorkspace();
+    const other = path.join(home, 'profiles', 'other');
+    mkdirSync(other, { recursive: true });
+    writeFileSync(path.join(other, 'package.json'), JSON.stringify({ name: 'other-profile' }));
+    const found = await discoverProfileDir({
+      env: { DSH_HOME: home },
+      pluginName: PLUGIN_NAME,
+      pluginRoot: root,
+    });
+    assert.equal(found, profileDir);
+    assert.notEqual(found, other);
+  });
+
+  it('一点证据都没有时返回 undefined，绝不乱猜', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'dsh-uc-noprofile-'));
+    created.push(home);
+    mkdirSync(path.join(home, 'profiles', 'web'), { recursive: true });
+    const found = await discoverProfileDir({
+      env: { DSH_HOME: home },
+      pluginName: PLUGIN_NAME,
+      pluginRoot: path.join(home, 'elsewhere'),
+    });
+    assert.equal(found, undefined);
   });
 });
 

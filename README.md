@@ -19,6 +19,7 @@ imports `react`.
 
 - [界面与功能](#界面与功能)
 - [完整性检查与一键修复](#完整性检查与一键修复)
+- [运行控制：停止与重启](#运行控制停止与重启)
 - [工作原理](#工作原理)
 - [HTTP 接口](#http-接口)
 - [安装](#安装)
@@ -42,6 +43,7 @@ imports `react`.
 | **完整性检查** | 10 项自检结果（文件 / 依赖 / 配置 / 运行环境）、「检查完整性」、「一键修复」 |
 | **自动检测** | 自动检测开关、检测频率（1 / 6 / 12 / 24 小时）、自动安装开关（默认关闭，开启时给出风险提示） |
 | **安装** | 将执行的完整命令、**安装进度**（不确定进度条 + 已用时长 / 已下载字节 / 速率 / 已取包数）、安装输出实时回显、安装结果与总耗时、以及「需要重启才生效」的提示 |
+| **运行控制** | 「停止 Harness」「重启 Harness」（各需点两次确认）；装完新版本时，重启按钮也会出现在安装卡片的提示旁边 |
 
 几个刻意的行为：
 
@@ -99,6 +101,17 @@ imports `react`.
   插件（提示「是拷贝而不是链接」），也可能是别的东西占了名字（报错并让人工处理）。
 - **修完把新的自检结果一并返回**，页面直接显示修好之后的样子，而不是让用户再点一次检查。
 
+## 运行控制：停止与重启
+
+**关闭浏览器并不会停止 Harness。** 关标签页只是断开连接，服务仍在后台跑着；而插件或配置更新之后又必须重启才生效。这两件事凑在一起，很容易变成「改了代码、页面上却一直是旧的」——所以停止与重启直接做进设置页。
+
+- 「停止 Harness」「重启 Harness」各需**点两次**确认，第二次才真的执行。
+- 动作**延后约 1.5 秒**执行，并且做成脱离本进程的独立子进程——要被停掉的正是这个进程，HTTP 回包必须先发出去。
+- **不自己实现杀进程与拉起**，而是调用你机器上原有的 `launch-deepseek-harness.ps1` / `stop-deepseek-harness.ps1`（由安装器放在 `<DSH_HOME>` 下）。这样认端口、清状态文件、带令牌打开浏览器这些细节只有一份实现，行为与桌面快捷方式完全一致。
+- 重启会带上 `-ForceRestart`，并**沿用当前服务的端口与工作区**（读 `<DSH_HOME>/run/web-server.json`），不会重启到别的端口上。
+- 两个脚本**缺哪个就禁用哪个按钮**，并在页面上写明缺的是哪个文件，而不是让按钮点了没反应。
+- 安装进行中拒绝停止/重启（`409`），避免把正在跑的安装器一起带走。
+
 
 ## 工作原理
 
@@ -112,6 +125,7 @@ imports `react`.
 │  index.js  → ctx.webServer.register(prefix)            │
 │  lib/center.js   状态机 / 路由 / 自动检测 / 安装子进程   │
 │  lib/integrity.js 自检与修复：文件、链接、注册、环境      │
+│  lib/lifecycle.js 停止/重启：调用本机启动器脚本           │
 │  lib/progress.js 进度信号：缓存体积、抓取计数、静默判定   │
 │  lib/semver.js   版本解析与 semver 优先级比较            │
 │  lib/installation.js  定位安装目录、探测包管理器         │
@@ -139,6 +153,8 @@ imports `react`.
 | `POST` | `/dsh-update-center/update` | 启动安装；立即返回，进度靠轮询 `/state` |
 | `GET` | `/dsh-update-center/integrity` | 跑一次完整性自检（只读），返回检查报告 |
 | `POST` | `/dsh-update-center/repair` | 修复可自动处理的项，返回动作清单与**修复后**的新报告 |
+| `POST` | `/dsh-update-center/stop` | 安排停止服务；约 1.5 秒后执行，因此回包会先返回 |
+| `POST` | `/dsh-update-center/restart` | 安排重启服务（带 `-ForceRestart`，沿用当前端口与工作区） |
 
 状态对象的主要字段：
 
@@ -157,6 +173,7 @@ imports `react`.
 | `installCommand` | 将执行（或已执行）的完整命令 |
 | `restartRequired` | 是否已装上磁盘但还没重启 |
 | `channels` / `statePath` | 允许的通道列表 / 偏好文件路径 |
+| `lifecycle` | `{ canStop, canRestart, stopper, launcher }`：本机能不能停止/重启，以及对应脚本路径 |
 
 自检报告（`/integrity` 与 `/repair` 共用同一形状）：
 
@@ -237,7 +254,7 @@ dsh plugin --profile web add "file:C:\dsh\dsh-update-center"
 无需安装依赖、无需构建：
 
 ```powershell
-node --test                  # 65 个用例：版本比较 + 进度信号 + 自检与修复 + 路由/状态/拒绝分支
+node --test                  # 80 个用例：版本比较 + 进度信号 + 自检与修复 + 停止/重启计划 + 路由与拒绝分支
 node --check index.js        # 语法检查（client.js / lib/*.js 同理）
 ```
 
@@ -263,6 +280,7 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 ├── lib/
 │   ├── center.js         状态机、HTTP 路由、自动检测、安装子进程与进度心跳
 │   ├── integrity.js      自检与一键修复：文件、源码依赖、profile 注册与链接、偏好文件
+│   ├── lifecycle.js      停止/重启：探测本机启动器脚本并安排脱离本进程的执行
 │   ├── progress.js       进度信号：缓存体积、抓取计数、静默判定（纯函数）
 │   ├── semver.js         版本解析与 semver 优先级比较（纯函数）
 │   └── installation.js   定位安装目录、探测包管理器、拼装安装命令
@@ -270,6 +288,7 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 │   ├── semver.test.js    版本比较的边界用例
 │   ├── progress.test.js  进度信号与安装命令的边界用例
 │   ├── integrity.test.js 自检判定与修复安全性（含「不误删真实目录」）
+│   ├── lifecycle.test.js 停止/重启的命令拼装与能力判定
 │   └── center.test.js    路由 / 状态 / 拒绝分支
 ├── locale/
 │   ├── zh.json           插件卡片的中文显示名与描述
@@ -292,6 +311,8 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 - **修复的写权限**：只有「一键修复」会写磁盘，范围仅限 profile 清单（补依赖项与 bundle 条目）、
   profile 里的插件链接、以及偏好文件；每项都先写同名 `.bak` 备份，且只补缺失、不删用户内容。
   检查（`GET /integrity`）永远只读。
+- **停止/重启不接受页面传来的任何命令**：它们只会调用 `<DSH_HOME>` 下两个固定名字的脚本，
+  页面能选的只有「停止」与「重启」这两个已定义动作，不存在把任意命令拼进参数的可能。
 
 ## 已知限制
 
@@ -315,6 +336,22 @@ npm run test:single          # 等价于 node --test --test-isolation=none
   实时 Client 插槽注册。
 
 ## 更新日志
+
+### 1.3.0
+
+- **新增「运行控制」**：设置页里可以直接停止或重启 Harness，不用再去桌面找快捷方式。
+  起因是个很常见的误会——「关掉浏览器就是停止服务」，其实服务一直在后台跑，于是
+  「改了代码但页面没变」这种事就没人说得清。
+- 停止/重启**不自己实现杀进程与拉起**，而是调用本机原有的 `launch-deepseek-harness.ps1` /
+  `stop-deepseek-harness.ps1`，行为与桌面快捷方式完全一致；脚本不存在时按钮禁用并写明缺了什么。
+- 动作延后 1.5 秒、并以脱离本进程的子进程执行：要被停掉的正是这个进程，回包必须先发出去。
+- 重启沿用当前端口与工作区（读 `run/web-server.json`），不会重启到别的地方。
+- 安装进行中拒绝停止/重启（`409`）。
+- **修复 profile 判定**：`DSH_PROFILE_DIR` / `DSH_PROFILE` 是 Harness 注入给**工具子进程**的，
+  宿主进程自己并没有，导致「profile 注册 / profile 链接」两项在真实环境里永远显示
+  「无法确定」、一键修复也跟着失效。现在改为从磁盘反推（谁的 `node_modules` 指向本插件，
+  或谁的清单里声明了本插件），证据不足时仍如实说「无法判定」而不是乱猜。
+- 新增 `lib/lifecycle.js`、`test/lifecycle.test.js`（用例总数 65 → 80）。
 
 ### 1.2.0
 

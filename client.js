@@ -125,6 +125,17 @@ window.__ModuleLoader__.load({
       ck_home_writable: 'Harness home writable',
       ck_node_version: 'Node version',
       ck_dsh_install: 'Harness installation',
+      lifecycleSection: 'Service control',
+      lifecycleHint: 'Closing the browser does NOT stop the Harness — it keeps running in the background. Use these buttons to actually stop or restart it.',
+      lifecycleStop: 'Stop Harness',
+      lifecycleRestart: 'Restart Harness',
+      lifecycleConfirmStop: 'Click again to stop',
+      lifecycleConfirmRestart: 'Click again to restart',
+      lifecycleScheduledStop: (seconds) => `Scheduled: the service stops in about ${seconds} s and this page will disconnect.`,
+      lifecycleScheduledRestart: (seconds) => `Scheduled: the service restarts in about ${seconds} s. A new tab opens automatically with a fresh sign-in link.`,
+      lifecycleMissingStop: (target) => `Cannot stop from here: ${target} was not found.`,
+      lifecycleMissingRestart: (target) => `Cannot restart from here: ${target} was not found.`,
+      lifecycleFailed: 'The action could not be scheduled',
       installSection: 'Install',
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
       command: 'Command',
@@ -199,6 +210,17 @@ window.__ModuleLoader__.load({
       ck_home_writable: 'DSH 主目录可写',
       ck_node_version: 'Node 版本',
       ck_dsh_install: 'Harness 安装',
+      lifecycleSection: '运行控制',
+      lifecycleHint: '关闭浏览器并不会停止 Harness —— 它会在后台继续运行。要真正停止或重启，用下面的按钮。',
+      lifecycleStop: '停止 Harness',
+      lifecycleRestart: '重启 Harness',
+      lifecycleConfirmStop: '再点一次即停止',
+      lifecycleConfirmRestart: '再点一次即重启',
+      lifecycleScheduledStop: (seconds) => `已安排：服务将在约 ${seconds} 秒后停止，本页面会断开连接。`,
+      lifecycleScheduledRestart: (seconds) => `已安排：服务将在约 ${seconds} 秒后重启，并自动打开带新登录链接的标签页。`,
+      lifecycleMissingStop: (target) => `无法从这里停止：找不到 ${target}。`,
+      lifecycleMissingRestart: (target) => `无法从这里重启：找不到 ${target}。`,
+      lifecycleFailed: '动作没有安排成功',
       installSection: '安装',
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
       command: '命令',
@@ -448,6 +470,47 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 停止/重启 Harness 的入口。
+     *
+     * 逻辑：这两个动作会直接掐断当前页面（要停的就是这个服务），所以要点两次
+     * 确认，并且只允许安排一次；安排成功后按钮就不再可用，免得用户反复点却
+     * 看不到任何反应。
+     */
+    function useLifecycle() {
+      const [armed, setArmed] = React.useState(null);
+      const [pending, setPending] = React.useState(null);
+      const [outcome, setOutcome] = React.useState(null);
+      const [failure, setFailure] = React.useState(null);
+
+      const arm = React.useCallback((action) => {
+        setArmed((current) => (current === action ? null : action));
+      }, []);
+
+      const run = React.useCallback(async (action) => {
+        setPending(action);
+        try {
+          const body = await request(action, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+          });
+          setOutcome({
+            action,
+            delayMs: Number.isFinite(body.delayMs) ? Number(body.delayMs) : 2000,
+          });
+          setFailure(null);
+        } catch (error) {
+          setFailure(error instanceof Error ? error.message : String(error));
+        } finally {
+          setPending(null);
+          setArmed(null);
+        }
+      }, []);
+
+      return { armed, arm, pending, outcome, failure, run };
+    }
+
+    /**
      * 把时间戳渲染成本地可读文本；无时间戳时显示「从未」。
      * @param {number|undefined} value 毫秒时间戳。
      * @param {Function} t 翻译函数。
@@ -518,6 +581,27 @@ window.__ModuleLoader__.load({
       const t = typeof props.t === 'function' ? props.t : (key) => en[key] ?? key;
       const { state, failure, busy, post } = useCenterState();
       const integrity = useIntegrity();
+      const lifecycle = useLifecycle();
+      // 运行控制相关：能力来自 Host 对「本机有没有启动器/停止脚本」的探测。
+      const lifecycleState = state?.lifecycle;
+      const stopReady = lifecycleState?.canStop === true;
+      const restartReady = lifecycleState?.canRestart === true;
+      const controlBusy = lifecycle.pending !== null || lifecycle.outcome !== null;
+      /** 生成一个「点两次确认」的按钮。 */
+      const controlButton = (action, baseLabel, confirmLabel, ready, missingLabel) => h('button', {
+        key: action,
+        type: 'button',
+        className: 'duc_button duc_buttonOutline',
+        disabled: !ready || controlBusy,
+        title: ready ? undefined : missingLabel,
+        onClick: () => {
+          if (lifecycle.armed !== action) {
+            lifecycle.arm(action);
+            return;
+          }
+          void lifecycle.run(action);
+        },
+      }, lifecycle.armed === action ? confirmLabel : baseLabel);
 
       const currentVersion = state?.currentVersion;
       const runningVersion = state?.runningVersion;
@@ -698,7 +782,13 @@ window.__ModuleLoader__.load({
           ])
           : null,
         state?.restartRequired === true
-          ? h('div', { className: 'duc_status duc_warn', key: 'restart' }, t('restart'))
+          ? h('div', { className: 'duc_status duc_warn', key: 'restart' }, [
+            t('restart'),
+            // 既然装了新版本就是要重启，索性把按钮放在这句话旁边，少一步来回。
+            restartReady && !controlBusy
+              ? controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), true, '')
+              : null,
+          ])
           : null,
         state?.updateResult?.ok === true && state?.restartRequired !== true
           ? h('div', { className: 'duc_status duc_ok', key: 'done' }, t('installed'))
@@ -798,9 +888,36 @@ window.__ModuleLoader__.load({
         ]),
       ]);
 
+      // 运行控制：说清「关浏览器 ≠ 停服务」，并把真的停/重启放进来。
+      const lifecycleCard = h('div', { className: 'duc_card', key: 'lifecycle' }, [
+        h('div', { className: 'duc_cardTitle', key: 'title' }, t('lifecycleSection')),
+        h('div', { className: 'duc_hint', key: 'hint' }, t('lifecycleHint')),
+        lifecycle.failure !== null
+          ? h('div', { className: 'duc_status duc_error', key: 'fail' }, `${t('lifecycleFailed')}：${lifecycle.failure}`)
+          : null,
+        lifecycle.outcome !== null
+          ? h('div', {
+            className: 'duc_status duc_warn',
+            key: 'scheduled',
+            role: 'status',
+            'aria-live': 'polite',
+          }, (lifecycle.outcome.action === 'stop' ? t('lifecycleScheduledStop') : t('lifecycleScheduledRestart'))(
+            Math.round((lifecycle.outcome.delayMs ?? 2000) / 1000),
+          ))
+          : null,
+        stopReady ? null : h('div', { className: 'duc_hint', key: 'nostop' },
+          t('lifecycleMissingStop')(String(lifecycleState?.stopper ?? ''))),
+        restartReady ? null : h('div', { className: 'duc_hint', key: 'norestart' },
+          t('lifecycleMissingRestart')(String(lifecycleState?.launcher ?? ''))),
+        h('div', { className: 'duc_actions', key: 'actions' }, [
+          controlButton('stop', t('lifecycleStop'), t('lifecycleConfirmStop'), stopReady, String(lifecycleState?.stopper ?? '')),
+          controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), restartReady, String(lifecycleState?.launcher ?? '')),
+        ]),
+      ]);
+
       return h(React.Fragment, null, [
         h('style', { key: 'css' }, CSS),
-        h('div', { className: 'duc_page', key: 'page' }, [header, versionCard, integrityCard, autoCard, installCard]),
+        h('div', { className: 'duc_page', key: 'page' }, [header, versionCard, integrityCard, autoCard, installCard, lifecycleCard]),
       ]);
     }
 
