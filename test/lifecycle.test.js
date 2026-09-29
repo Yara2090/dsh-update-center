@@ -9,7 +9,7 @@
  *   4. 安排动作时先写回包再执行——用假 spawn 验证参数形状。
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -131,9 +131,74 @@ describe('scheduleLifecycle', () => {
     assert.equal(calls.length, 0);
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].options, { detached: true, stdio: 'ignore', windowsHide: true });
+    // Windows 上必须是 detached:false —— 见 lib/lifecycle.js 里那段注释：
+    // DETACHED_PROCESS 会让 Windows PowerShell 以退出码 0 静默退出、脚本一行不跑。
+    assert.deepEqual(calls[0].options, {
+      detached: process.platform !== 'win32',
+      stdio: 'ignore',
+      windowsHide: true,
+    });
     assert.ok(calls[0].args.includes('-ForceRestart'));
     assert.equal(calls[0].args.at(-1), 'C:\\dsh');
+  });
+
+  it('子进程启动失败时如实上报，而不是静默失败', async () => {
+    const home = makeHome();
+    const events = [];
+    scheduleLifecycle('restart', {
+      env: { DSH_HOME: home },
+      delayMs: 1,
+      spawn: () => ({
+        pid: 0,
+        unref() {},
+        on(event, handler) {
+          if (event === 'error') handler(new Error('boom'));
+        },
+      }),
+      onEvent: (event) => events.push(event),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(events.length, 1);
+    assert.equal(events[0].ok, false);
+    assert.match(events[0].error, /boom/);
+  });
+
+  it('子进程成功拉起时上报 pid', async () => {
+    const home = makeHome();
+    const events = [];
+    scheduleLifecycle('restart', {
+      env: { DSH_HOME: home },
+      delayMs: 1,
+      spawn: () => ({
+        pid: 4242,
+        unref() {},
+        on(event, handler) {
+          if (event === 'spawn') handler();
+        },
+      }),
+      onEvent: (event) => events.push(event),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.deepEqual(events, [{ ok: true, pid: 4242 }]);
+  });
+
+  it('真的能把 PowerShell 拉起来执行脚本（Windows 冒烟测试）', { skip: process.platform !== 'win32' }, async () => {
+    // 这条用例是这次故障的直接产物：只断言「spawn 被调用了」并不够，
+    // 因为 detached 的写法会让 PowerShell 起得来、退得掉、却什么都不执行。
+    const home = makeHome();
+    const marker = path.join(home, 'marker.txt');
+    const script = path.join(home, 'probe.ps1');
+    writeFileSync(script, `Set-Content -LiteralPath "${marker}" -Value ok -Encoding UTF8\n`);
+    scheduleLifecycle('restart', {
+      env: { DSH_HOME: home },
+      delayMs: 1,
+      capability: { home, launcher: script, stopper: script, canRestart: true, canStop: true },
+    });
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(marker) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.ok(existsSync(marker), 'PowerShell 没有真正执行脚本（典型症状：detached 导致静默退出）');
   });
 
   it('缺脚本时立刻抛错，不安排任何东西', () => {

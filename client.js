@@ -136,6 +136,8 @@ window.__ModuleLoader__.load({
       lifecycleMissingStop: (target) => `Cannot stop from here: ${target} was not found.`,
       lifecycleMissingRestart: (target) => `Cannot restart from here: ${target} was not found.`,
       lifecycleFailed: 'The action could not be scheduled',
+      lifecycleLastOk: (action) => `Last "${action}": the helper process started.`,
+      lifecycleLastFailed: (error) => `The last action never ran: ${error}`,
       installSection: 'Install',
       installHint: 'The update is installed into the same global prefix. Restart the Harness afterwards to run the new version.',
       command: 'Command',
@@ -221,6 +223,8 @@ window.__ModuleLoader__.load({
       lifecycleMissingStop: (target) => `无法从这里停止：找不到 ${target}。`,
       lifecycleMissingRestart: (target) => `无法从这里重启：找不到 ${target}。`,
       lifecycleFailed: '动作没有安排成功',
+      lifecycleLastOk: (action) => `上次「${action}」：启动器子进程已成功拉起。`,
+      lifecycleLastFailed: (error) => `上次动作根本没有跑起来：${error}`,
       installSection: '安装',
       installHint: '更新会安装到同一个全局目录；完成后需要重启 Harness 才能运行新版本。',
       command: '命令',
@@ -909,6 +913,16 @@ window.__ModuleLoader__.load({
           t('lifecycleMissingStop')(String(lifecycleState?.stopper ?? ''))),
         restartReady ? null : h('div', { className: 'duc_hint', key: 'norestart' },
           t('lifecycleMissingRestart')(String(lifecycleState?.launcher ?? ''))),
+        // 上一次动作的真实结果。「点了没反应」之所以难查，就是因为没人告诉你
+        // 那个子进程到底起来没有——现在这里会直说。
+        state?.lifecycleLast === undefined || lifecycle.outcome !== null
+          ? null
+          : h('div', {
+            className: state.lifecycleLast.ok === true ? 'duc_status duc_ok' : 'duc_status duc_error',
+            key: 'last',
+          }, state.lifecycleLast.ok === true
+            ? t('lifecycleLastOk')(state.lifecycleLast.action === 'stop' ? t('lifecycleStop') : t('lifecycleRestart'))
+            : t('lifecycleLastFailed')(String(state.lifecycleLast.error ?? ''))),
         h('div', { className: 'duc_actions', key: 'actions' }, [
           controlButton('stop', t('lifecycleStop'), t('lifecycleConfirmStop'), stopReady, String(lifecycleState?.stopper ?? '')),
           controlButton('restart', t('lifecycleRestart'), t('lifecycleConfirmRestart'), restartReady, String(lifecycleState?.launcher ?? '')),
