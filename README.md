@@ -204,46 +204,42 @@ Chromium 只允许「由脚本打开的」或「没有历史记录的」标签�
 
 ## 安装
 
-三步，两分钟。前提：已经装好 **Node ≥ 20** 和 **DeepSeek Harness**。
+两种方式，任选一种。前提：已经装好 **Node ≥ 20** 和 **DeepSeek Harness**。
 
-### 第 1 步：下载到本地
+### 方式一：纯手动
 
 ```powershell
+# 1. 下载
 git clone https://github.com/Yara2090/dsh-update-center.git C:\dsh\dsh-update-center
-```
 
-放哪儿都行，下面统一按 `C:\dsh\dsh-update-center` 写。
-
-### 第 2 步：装进 Harness（两种方式，任选一种）
-
-**方式 A：让 Harness 自己装（推荐）**——在 Harness 的对话框里说一句：
-
-> 把 `C:\dsh\dsh-update-center` 装成插件
-
-助手会调用插件管理器把安装做完：装好依赖、写进 profile 的 bundle 列表，支持热加载时立即生效。
-
-**方式 B：自己敲命令**
-
-```powershell
+# 2. 装进 web profile（装依赖）
 dsh plugin --profile web add "file:C:\dsh\dsh-update-center"
 ```
 
-这条命令只装依赖；还要让插件真正启用，得把它写进 profile 的 bundle 列表——
-打开 `~/.dsh/profiles/web/package.json`，在 `dsh.profile.bundles` 里加上一行
-`"@local/dsh-update-center"`。
+3. 让插件真正启用：打开 `~/.dsh/profiles/web/package.json`，在 `dsh.profile.bundles` 里加上一行
+   `"@local/dsh-update-center"`。
 
-### 第 3 步：重启 Harness，打开「设置 → 更新与版本」
+   > 这一步别省：`dsh plugin add` 只装依赖，不写 bundle 列表。少了它，插件不会被加载，
+   > 设置里也就不会出现「更新与版本」。
 
-看到这个页面就装好了。
+4. 重启 Harness，打开 **设置 → 更新与版本**。
+
+### 方式二：把 GitHub 地址交给 DSH，让它装
+
+在 Harness 的对话框里发一句：
+
+> 把 https://github.com/Yara2090/dsh-update-center 装成插件
+
+DSH 会自己克隆、装依赖、并把插件写进 profile 的 bundle 列表；按它说的重启一次即可。
 
 ### 出问题时
 
-| 现象 | 多半是 | 怎么办 |
-|---|---|---|
-| 设置里找不到「更新与版本」 | 第 2 步的 bundle 列表没写进去，插件压根没被加载 | 按方式 B 的说明检查 `dsh.profile.bundles`，或者直接用方式 A 重装一次 |
-| 页面在，但卡片里报问题 | 链接断了、偏好文件坏了、插件目录被搬走了 | 点「一键修复」，能补的它会补，补不了的会说明要你做什么 |
-| 浏览器打不开这个页面 | 它只对本机回环地址开放 | 在跑 Harness 的那台机器上打开 |
-| 提示找不到 `dsh` 命令 | Harness 还没全局安装 | `npm i -g @deepseek-ai/dsh` |
+| 现象 | 怎么办 |
+|---|---|
+| 设置里找不到「更新与版本」 | 多半是 bundle 列表没写进去；按方式一第 3 步检查 `dsh.profile.bundles` |
+| 页面在，但卡片里报问题 | 点卡片里的「一键修复」，能补的它会补，补不了的会说明要你做什么 |
+| 浏览器打不开这个页面 | 它只对本机回环地址开放，在跑 Harness 的那台机器上打开 |
+| 提示找不到 `dsh` 命令 | 先 `npm i -g @deepseek-ai/dsh` |
 
 装好之后基本不用管：默认每 6 小时自动查一次新版本，有新版就在这个页面里提示。
 
@@ -367,7 +363,10 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 - **移除整套「旧页面自动恢复」机制**（`resumeAt` / `loginUrl` / 轮询 / 手动重开按钮）。
   它成立的前提是「服务会自己回来」，而那个前提只属于已经去掉的「重启」；连同一起移除的还有
   给页面暴露带令牌地址的那条路径。
-- 安装卡片的「需要重启才生效」改为明确指引：点「停止 Harness」，再用桌面快捷方式启动。
+- 安装卡片上的「需要重启才生效」改为明确指引：点「停止 Harness」，再用桌面快捷方式启动。
+- README 的安装说明按要求压成**两种方式**：纯手动（下载 → 装依赖 → 写 bundle 列表 → 重启），
+  或把 GitHub 地址交给 DSH 让它装。原先那种「先下载、再分两种装法、最后重启」的三段式里，
+  其实只有这两条路。
 - 用例相应调整（84 个，去掉两个只服务于已删机制的用例）。
 
 ### 1.4.1
