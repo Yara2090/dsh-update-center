@@ -19,6 +19,8 @@ imports `react`.
 
 ![更新与版本设置页](docs/screenshot.png)
 
+*设置 → 更新与版本：已安装与最新版本、更新通道、上次检测，以及完整性自检逐项结果。*
+
 ---
 
 ## 目录
@@ -50,6 +52,10 @@ imports `react`.
 | **自动检测** | 自动检测开关、检测频率（1 / 6 / 12 / 24 小时）、自动安装开关（默认关闭，开启时给出风险提示） |
 | **安装** | 将执行的完整命令、**安装进度**（不确定进度条 + 已用时长 / 已下载字节 / 速率 / 已取包数）、安装输出实时回显、安装结果与总耗时、以及「需要重启才生效」的提示 |
 | **运行控制** | 「停止 Harness」（点两次确认）；停止后弹出浮层并自动尝试关闭标签页，浏览器不允许时提示按 Ctrl+W |
+
+![自动检测、安装与运行控制](docs/screenshot-2.png)
+
+*同一页往下：自动检测频率与自动安装开关、将执行的完整安装命令、「停止 Harness」。*
 
 几个刻意的行为：
 
@@ -314,7 +320,8 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 │   ├── zh.json           插件卡片的中文显示名与描述
 │   └── en.json           英文显示名与描述
 ├── docs/
-│   └── screenshot.png    README 顶部的页面截图
+│   ├── screenshot.png    README 顶部：版本信息与完整性检查
+│   └── screenshot-2.png  「界面与功能」：自动检测、安装与运行控制
 ├── .github/workflows/
 │   └── test.yml          CI：Ubuntu（Node 20/22）与 Windows（Node 22）跑 npm test
 ├── cordis.patch.yml      bundle 补丁：插入 Host 插件行
