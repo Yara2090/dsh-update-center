@@ -283,7 +283,7 @@ DSH 会自己克隆、装依赖、并把插件写进 profile 的 bundle 列表�
 无需安装依赖、无需构建：
 
 ```powershell
-node --test                  # 89 个用例：版本比较 + 进度信号 + 自检与修复 + 停止计划 + 路由与拒绝分支
+node --test                  # 91 个用例：版本比较 + 进度信号 + 自检与修复 + 停止计划 + 路由与拒绝分支
 node --check index.js        # 语法检查（client.js / lib/*.js 同理）
 ```
 

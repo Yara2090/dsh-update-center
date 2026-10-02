@@ -373,4 +373,33 @@ describe('挂载与卸载', () => {
     createUpdateCenter({});
     assert.equal(existsSync(path.join(home, 'dsh-update-center.json')), false);
   });
+
+  it('旧偏好文件里的「重启」记录不会被当成一次停止显示', () => {
+    // 1.6.0 删掉了重启，但旧偏好文件里可能还躺着一条 action:"restart" 的记录：
+    // 字段形状和停止一样（同样有 ok/pid），若照单全收，卡片会把一次重启说成一次
+    // 停止——而界面上的名字已经写死成「停止 Harness」了。
+    const statePath = path.join(home, 'dsh-update-center.json');
+    writeFileSync(statePath, JSON.stringify({
+      channel: 'latest',
+      lastLifecycle: { action: 'restart', at: 1790927107921, ok: true, pid: 29728 },
+    }));
+
+    const center = createUpdateCenter({ registry: 'http://127.0.0.1:1/' });
+    const dispose = center.mount({ webServer: { register: () => () => {} } });
+    assert.equal(center.state.lifecycleLast, undefined);
+    // 其余偏好仍要照常读进来，别把整份文件一起丢了。
+    assert.equal(center.state.channel, 'latest');
+    dispose();
+  });
+
+  it('旧偏好文件里留下的「停止」记录仍然会被读进来', () => {
+    const statePath = path.join(home, 'dsh-update-center.json');
+    writeFileSync(statePath, JSON.stringify({
+      lastLifecycle: { action: 'stop', at: 1, ok: true, pid: 5 },
+    }));
+    const center = createUpdateCenter({ registry: 'http://127.0.0.1:1/' });
+    const dispose = center.mount({ webServer: { register: () => () => {} } });
+    assert.deepEqual(center.state.lifecycleLast, { action: 'stop', at: 1, ok: true, pid: 5 });
+    dispose();
+  });
 });
