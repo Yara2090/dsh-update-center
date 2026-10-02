@@ -294,6 +294,11 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 测试不访问外网：注册表由本地假 HTTP 服务提供，偏好文件写在临时目录里，
 也绝不会真的执行 `npm install`。
 
+推上去会自动跑同一套用例（见顶部徽章）：Ubuntu 上跑 Node 20 与 22，Windows 上跑 Node 22。
+Windows 那条会让 `test/lifecycle.test.js` 里的 PowerShell 冒烟测试**真的执行**——那条用例
+是「`detached` 让 PowerShell 静默退出」的产物，只在 Windows 上跑才有意义，其余平台自动跳过。
+`index.js` 与 `client.js` 不被任何用例导入，因此 CI 里另外单独对它们跑 `node --check`。
+
 改动 `client.js` 后，运行中的 Harness 会通过 bundle 探测自动热加载新的浏览器半边；
 改动 Host 半边（`index.js` / `lib/`）通常需要重启 Harness 才会载入新的模块代。
 
@@ -343,6 +348,10 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 - **修复的写权限**：只有「一键修复」会写磁盘，范围仅限 profile 清单（补依赖项与 bundle 条目）、
   profile 里的插件链接、以及偏好文件；每项都先写同名 `.bak` 备份，且只补缺失、不删用户内容。
   检查（`GET /integrity`）永远只读。
+  重建链接是唯一会删东西的动作，所以「这个位置到底是不是链接」必须判得准：基准是**父目录
+  解析后的写法**，而不是拿传进来的路径直接比——后者在路径写法不唯一时（Windows 的 8.3 短名、
+  路径中间有链接）会把一个真实目录误判成链接，然后删掉重建。这条有专门的回归用例守着
+  （见 CHANGELOG 的 1.5.2）。
 - **停止不接受页面传来的任何命令**：它只会调用 `<DSH_HOME>` 下那个固定名字的脚本，页面能选的
   只有「停止」这一个已定义动作，不存在把任意命令拼进参数的可能。
 - **进命令行的外部输入都先校验**：安装命令在 Windows 上经由 shell 执行（`shell: true`，因为
