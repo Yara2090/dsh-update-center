@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-update-center",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "private": true,
   "type": "module",
   "description": "Updates & Version settings page for the DeepSeek Harness Web GUI: detects a newer @deepseek-ai/dsh release, installs it, self-checks the plugin installation with a one-click repair, and stops the service.",
@@ -14,6 +14,15 @@
   ],
   "license": "MIT",
   "icon": "./icon.svg",
+  "main": "./index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yara2090/dsh-update-center.git"
+  },
+  "homepage": "https://github.com/Yara2090/dsh-update-center#readme",
+  "bugs": {
+    "url": "https://github.com/Yara2090/dsh-update-center/issues"
+  },
   "engines": {
     "node": ">=20"
   },

@@ -283,7 +283,7 @@ DSH 会自己克隆、装依赖、并把插件写进 profile 的 bundle 列表�
 无需安装依赖、无需构建：
 
 ```powershell
-node --test                  # 91 个用例：版本比较 + 进度信号 + 自检与修复 + 停止计划 + 路由与拒绝分支
+node --test                  # 95 个用例：版本比较 + 进度信号 + 自检与修复 + 停止计划 + 路由与拒绝分支 + 前后端接口一致性
 node --check index.js        # 语法检查（client.js / lib/*.js 同理）
 ```
 
@@ -296,6 +296,13 @@ npm run test:single          # 等价于 node --test --test-isolation=none
 
 测试不访问外网：注册表由本地假 HTTP 服务提供，偏好文件写在临时目录里，
 也绝不会真的执行 `npm install`。
+
+其中 `test/endpoints.test.js` 是一道**接口一致性检查**，不是功能测试：前端（`client.js`）
+与后端（`lib/center.js`）靠字符串约定动作名，两边各改一半不会有任何报错，只会在运行时
+静默 404——正是下面「已知限制」里说的那类「点了没反应」。它断言三件事：前端调的每个动作
+后端都认、**后端认的每个动作前端都在用**、两边的路由前缀是同一个字符串。最后两条是冲着
+「半撤」去的：一条没人走的后端路由，1.6.0 删掉的那个重启路由就是这种残留。检查本身也有
+非空断言，防止「什么都抽不到于是永远通过」。
 
 推上去会自动跑同一套用例（见顶部徽章）：Ubuntu 上跑 Node 20 与 22，Windows 上跑 Node 22。
 Windows 那条会让 `test/lifecycle.test.js` 里的 PowerShell 冒烟测试**真的执行**——那条用例
@@ -323,7 +330,8 @@ Windows 那条会让 `test/lifecycle.test.js` 里的 PowerShell 冒烟测试**�
 │   ├── progress.test.js  进度信号与安装命令的边界用例
 │   ├── integrity.test.js 自检判定与修复安全性（含「不误删真实目录」）
 │   ├── lifecycle.test.js 停止的命令拼装与能力判定（含唯一真的拉起进程的 Windows 冒烟测试）
-│   └── center.test.js    路由 / 状态 / 拒绝分支 / 安装出口的版本号校验
+│   ├── center.test.js    路由 / 状态 / 拒绝分支 / 安装出口的版本号校验
+│   └── endpoints.test.js 前后端接口一致性：动作名与路由前缀不许两边各改一半
 ├── locale/
 │   ├── zh.json           插件卡片的中文显示名与描述
 │   └── en.json           英文显示名与描述
