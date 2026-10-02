@@ -3,6 +3,24 @@
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；每一版都有对应的
 `v<版本号>` 标签，可在 [Releases](https://github.com/Yara2090/dsh-update-center/releases) 查看。
 
+### 1.6.0
+
+- **删掉「重启」的全部残留。** 1.5.0 只把界面上的按钮撤了，实现、`POST /restart` 路由
+  和一组用例都还留着——于是它成了一条**谁都不走、也从没被真跑过**的路径。实测触发它
+  （走的就是那条还活着的路由）会让服务停掉、却拉不起来：启动器每次启动前会清日志，
+  所以连失败现场都没留下，只能靠「服务没自己回来」这件事反推。
+  - `lib/lifecycle.js` 只剩停止：`planLifecycle`/`scheduleLifecycle` → `planStop`/`scheduleStop`，
+    去掉 action 参数、`-ForceRestart`、`-Workspace` 与 `LAUNCH_SCRIPT`。
+  - `resolveLifecycle` 不再返回 `canRestart` / `launcher`；状态快照里的 `lifecycle`
+    从 `{canStop, canRestart, stopper, launcher}` 收窄为 `{canStop, stopper}`。
+  - 路由表里没有 `/restart` 了，访问它会得到 `404`（**这条有专门的用例守着，防止它
+    悄悄长回来**）。
+  - 界面（`client.js`）本来就没在用这些字段，只是清掉了三句提到「重启」的过时注释。
+- **这一版真正想记下的教训不是「重启坏了」，而是「半撤」的代价。** 入口撤掉之后，
+  剩下那半看起来是活的（有路由、有实现、有绿色用例），实际却从没被端到端验证过；
+  而它的失败方式是把服务停掉。要撤就撤干净，或者留一条真的有测试走通的路径。
+- 用例数不变（89）：删掉一条重启用例，补上一条「`/restart` 必须 404」的守门用例。
+
 ### 1.5.2
 
 - **修复「一键修复」可能删掉一个真实目录**（数据安全）。判据 `looksLikeLink` 此前拿

@@ -288,7 +288,7 @@ window.__ModuleLoader__.load({
 .duc_buttonPrimary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}
 .duc_buttonOutline{border:0.5px solid var(--dsw-alias-border-l3)}
 .duc_buttonOutline:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
-/* 停止是不可逆的那一个：用错误色描边，让它和重启在视觉上就不会被看混。 */
+/* 停止是不可逆的动作：用错误色描边，让人在点下去之前就觉得它跟别的不一样。 */
 .duc_buttonDanger{border:0.5px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}
 .duc_buttonDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .duc_switch{box-sizing:border-box;position:relative;flex:0 0 auto;width:36px;height:20px;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
@@ -312,7 +312,7 @@ window.__ModuleLoader__.load({
 .duc_checkMark{flex:0 0 auto;width:12px;font-weight:600}
 .duc_checkName{flex:0 0 auto;color:var(--dsw-alias-label-primary)}
 .duc_checkDetail{flex:1;min-width:0;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;overflow-wrap:anywhere}
-/* 停止/重启之后旧页面会永远停在「重新连接中」。既然它回不来，就盖一层说清楚
+/* 停止之后旧页面会永远停在「重新连接中」。既然它回不来，就盖一层说清楚
    「发生了什么、接下来该去哪」——这是用户唯一还能看见的提示。 */
 .duc_overlay{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.55)}
 .duc_overlayCard{width:100%;max-width:520px;display:flex;flex-direction:column;gap:10px;padding:20px;border-radius:var(--dsw-radius-md);border:0.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:14px;line-height:22px;box-shadow:0 12px 40px rgba(0,0,0,0.35)}
@@ -494,9 +494,9 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 停止/重启 Harness 的入口。
+     * 停止 Harness 的入口。
      *
-     * 逻辑：这两个动作会直接掐断当前页面（要停的就是这个服务），所以要点两次
+     * 逻辑：这个动作会直接掐断当前页面（要停的就是这个服务），所以要点两次
      * 确认，并且只允许安排一次；安排成功后按钮就不再可用，免得用户反复点却
      * 看不到任何反应。
      */

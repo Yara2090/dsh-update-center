@@ -285,30 +285,35 @@ describe('更新面板路由', () => {
     assert.equal(body.repairedCount, 0);
   });
 
-  it('缺启动器脚本时拒绝停止与重启，并说明缺了什么', async () => {
-    // 测试环境的 DSH_HOME 是临时目录，里面没有启动器脚本，因此这里走拒绝分支：
+  it('缺停止脚本时拒绝停止，并说明缺了什么', async () => {
+    // 测试环境的 DSH_HOME 是临时目录，里面没有停止脚本，因此这里走拒绝分支：
     // 既验证了判定，也保证用例绝不会真的去停掉谁的服务。
     const stop = await invoke(center, { method: 'POST', url: `${ROUTE_PREFIX}/stop`, body: '{}' });
     assert.equal(stop.status, 409);
     assert.equal(stop.body.ok, false);
     assert.match(String(stop.body.error), /停止脚本/);
+  });
 
+  it('重启路由已经删掉，访问它只会得到 404', async () => {
+    // 1.6.0 删掉了「重启」：界面按钮早在 1.5.0 就撤了，实现与这条路由却还留着，
+    // 成了一条从没被真跑过、却能停掉服务的路径。这条用例守着它别再悄悄回来。
     const restart = await invoke(center, { method: 'POST', url: `${ROUTE_PREFIX}/restart`, body: '{}' });
-    assert.equal(restart.status, 409);
+    assert.equal(restart.status, 404);
     assert.equal(restart.body.ok, false);
-    assert.match(String(restart.body.error), /启动器脚本/);
+    assert.match(String(restart.body.error), /restart/);
   });
 
   it('脚本齐全时排定停止动作', async () => {
-    // 放两个假脚本：真被执行的会是它们，因此这个用例不会碰真实服务。
-    writeFileSync(path.join(home, 'launch-deepseek-harness.ps1'), '# fake launcher\n');
+    // 放一个假停止脚本：真被执行的会是它，因此这个用例不会碰真实服务。
     writeFileSync(path.join(home, 'stop-deepseek-harness.ps1'), '# fake stopper\n');
     const fresh = createUpdateCenter({ registry: registry.origin });
     const { status, body } = await invoke(fresh, { method: 'POST', url: `${ROUTE_PREFIX}/stop`, body: '{}' });
     assert.equal(status, 200);
     assert.equal(body.scheduled, true);
-    assert.equal(body.action, 'stop');
     assert.match(String(body.script), /stop-deepseek-harness\.ps1$/);
+    // 计划里不该再有 action 字段（重启时代的产物）；能力对象的字段由
+    // test/lifecycle.test.js 逐字钉住。
+    assert.equal(body.action, undefined);
     fresh.dispose();
   });
 });
