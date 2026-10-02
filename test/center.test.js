@@ -5,8 +5,9 @@
  * 而是直接实例化内核并把它当成普通 node:http 处理器来打，覆盖：
  *   1. 正常读取状态；
  *   2. 偏好的写入与落盘；
- *   3. 注册表正常 / 缺标签 / 报错三条分支（用本地假注册表，测试不依赖外网）；
- *   4. 方法、请求体、未知操作、非回环来源等拒绝分支。
+ *   3. 注册表正常 / 缺标签 / 返回非版本号 / 报错四条分支（用本地假注册表，测试不依赖外网）；
+ *   4. 方法、请求体、未知操作、非回环来源等拒绝分支；
+ *   5. 安装出口的版本号校验：非法版本号必须被拒绝，且绝不启动安装进程。
  * 安装动作本身不会真跑 npm：只在「尚未检测到版本」这条前置校验上验证它被拒绝。
  */
 import assert from 'node:assert/strict';
@@ -80,6 +81,13 @@ async function startFakeRegistry() {
     if (req.url.includes('missing-tags')) {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ name: 'stub' }));
+      return;
+    }
+    if (req.url.includes('bogus-tag')) {
+      // 注册表是外部输入：这里故意返回一个「不是版本号」的 dist-tag，模拟被投毒的
+      // 源或写坏的镜像。它绝不能活着走到安装命令行。
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ 'dist-tags': { latest: '9.9.9; calc.exe', next: '9.9.9 && whoami' } }));
       return;
     }
     if (req.url.includes('boom')) {
@@ -188,6 +196,45 @@ describe('更新面板路由', () => {
     const broken = createUpdateCenter({ registry: `${registry.origin}boom/` });
     const { body } = await invoke(broken, { method: 'POST', url: `${ROUTE_PREFIX}/check`, body: '{}' });
     assert.match(String(body.checkError), /500/);
+  });
+
+  it('注册表返回不是版本号的标签时当场拒绝，不记成可用版本', async () => {
+    // 这条用例守的是「外部字符串不进命令行」：dist-tag 会被拼成
+    // `npm install --global @deepseek-ai/dsh@<tag>`，而 Windows 上那条命令经由 shell 执行。
+    const poisoned = createUpdateCenter({ registry: `${registry.origin}bogus-tag/` });
+    const { status, body } = await invoke(poisoned, { method: 'POST', url: `${ROUTE_PREFIX}/check`, body: '{}' });
+    assert.equal(status, 200);
+    assert.match(String(body.checkError), /不是合法版本号/);
+    assert.equal(body.latestVersion, undefined);
+    assert.equal(body.updateAvailable, false);
+    poisoned.dispose();
+  });
+
+  it('即便状态里被塞进非法版本号，/update 也拒绝且不启动安装器', async () => {
+    // 上一道闸在读取注册表时；这一道在安装出口本身。安全闸不能只建在调用方，
+    // 因此这里绕过 check 直接把非法版本号写进状态，验证出口自己会拦。
+    const victim = createUpdateCenter({ registry: registry.origin });
+    victim.state.latestVersion = '9.9.9; calc.exe';
+    const { status, body } = await invoke(victim, { method: 'POST', url: `${ROUTE_PREFIX}/update`, body: '{}' });
+    assert.equal(status, 409);
+    assert.equal(body.ok, false);
+    assert.match(String(body.updateResult.error), /不是合法的版本号/);
+    // 关键：没有真的起任何安装进程。
+    assert.equal(body.updating, false);
+    assert.equal(body.updateTarget, undefined);
+    victim.dispose();
+  });
+
+  it('非法注册表地址退回官方源，合法地址原样保留', async () => {
+    // registry 同样会进命令行（--registry=<地址>），因此它也不能是任意字符串。
+    assert.equal(createUpdateCenter({ registry: 'not a url' }).state.registry, 'https://registry.npmjs.org/');
+    assert.equal(createUpdateCenter({ registry: 'file:///etc/passwd' }).state.registry, 'https://registry.npmjs.org/');
+    assert.equal(createUpdateCenter({ registry: '' }).state.registry, 'https://registry.npmjs.org/');
+    assert.equal(createUpdateCenter({}).state.registry, 'https://registry.npmjs.org/');
+    assert.equal(
+      createUpdateCenter({ registry: 'https://mirror.corp/npm/' }).state.registry,
+      'https://mirror.corp/npm/',
+    );
   });
 
   it('尚未检测到版本时拒绝安装', async () => {

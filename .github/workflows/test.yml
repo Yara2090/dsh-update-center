@@ -1,0 +1,44 @@
+name: 测试
+
+# 本项目零运行时依赖，因此没有 install 步骤：checkout + setup-node 之后直接跑用例。
+# 主目标平台是 Windows（安装命令、停止脚本、npm 缓存布局都围绕它），所以
+# windows 那一条必须留着——test/lifecycle.test.js 里的 PowerShell 冒烟测试
+# 只在 Windows 上会真的执行，其它平台自动跳过。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: '20'
+          - os: ubuntu-latest
+            node: '22'
+          - os: windows-latest
+            node: '22'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 运行用例
+        run: npm test
+
+      # index.js 与 client.js 不被任何用例导入（前者只挂载、后者是浏览器半边），
+      # 所以语法错误不会让上面的用例变红。这两行专门兜住它们。
+      - name: 语法检查
+        run: |
+          node --check index.js
+          node --check client.js
