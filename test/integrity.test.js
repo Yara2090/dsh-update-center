@@ -118,6 +118,24 @@ function removeLinkForTest(target) {
   }
 }
 
+/**
+ * 造一条「中间层是链接」的别名路径，用来让同一个目录拥有第二种写法。
+ *
+ * 逻辑：`realpath` 会把整条路径规范化——Windows 上包括 8.3 短名与大小写，任何平台
+ * 都包括路径中间的链接。因此「同一个目录，两种写法」是真实存在的：GitHub 的
+ * Windows runner 上临时目录就带 8.3 短名，那里的 `realpath(p) !== p` 对**普通目录**
+ * 也成立。这个 helper 让这种情形在任何机器上都能被确定地复现。
+ * @param {string} target 要别名到的真实目录（绝对路径）。
+ * @returns {string} 指向它的别名路径。
+ */
+function makeAliasPath(target) {
+  const outer = mkdtempSync(path.join(tmpdir(), 'dsh-uc-alias-'));
+  created.push(outer);
+  const alias = path.join(outer, 'alias');
+  symlinkSync(target, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  return alias;
+}
+
 /** 按 id 取一条检查结果。 */
 const find = (report, id) => report.checks.find((check) => check.id === id);
 
@@ -209,8 +227,31 @@ describe('discoverProfileDir', () => {
     assert.equal(found, profileDir);
   });
 
-  it('无关的 profile 不会被选中', async () => {
-    const { root, home, profileDir } = makeWorkspace();
+  it('插件目录的写法不是规范形式时，仍能靠磁盘上的链接认出 profile', async () => {
+    // 磁盘上的链接是最硬的一份证据（score 3）。此前这里拿 realpath 的结果直接和传进来的
+    // pluginRoot 比字符串，pluginRoot 只要写法不规范（Windows 上：8.3 短名、大小写；
+    // 任何平台：路径中间有链接），这一分就永远拿不到，只能退回清单去猜——而清单恰恰是
+    // 坏掉时才需要自检的那部分。GitHub 的 Windows runner 上临时目录带 8.3 短名，
+    // 这条用例就是那次真实变红的原因。
+    const { base, root, home, profileDir } = makeWorkspace();
+    const alias = makeAliasPath(base);
+    // 同一个目录，只是换一种写法：alias/dsh-update-center 就是 root。
+    const aliasedRoot = path.join(alias, 'dsh-update-center');
+    assert.equal(realpathSync.native(aliasedRoot), realpathSync.native(root));
+    assert.notEqual(aliasedRoot, root);
+
+    // 清单里不留任何线索：这一分只能来自磁盘上的链接。
+    writeProfileManifest(profileDir, { name: 'p', dependencies: {}, dsh: { profile: { bundles: [] } } });
+
+    const found = await discoverProfileDir({
+      env: { DSH_HOME: home },
+      pluginName: PLUGIN_NAME,
+      pluginRoot: aliasedRoot,
+    });
+    assert.equal(found, profileDir);
+  });
+
+  it('无关的 profile 不会被选中', async () => {    const { root, home, profileDir } = makeWorkspace();
     const other = path.join(home, 'profiles', 'other');
     mkdirSync(other, { recursive: true });
     writeFileSync(path.join(other, 'package.json'), JSON.stringify({ name: 'other-profile' }));
@@ -343,8 +384,36 @@ describe('checkIntegrity', () => {
     assert.match(check.detail, /拷贝/);
   });
 
-  it('偏好文件损坏时标成可修复', async () => {
-    const { options, statePath, home } = makeWorkspace();
+  it('路径写法不是规范形式时，普通目录不会被误判成链接，更不会被修复删掉', async () => {
+    // 这是本次变红暴露出的真问题，也是这套用例最该守住的一条：
+    // looksLikeLink 此前拿 realpath(target) 和 target 直接比字符串。realpath 会把
+    // 整条路径规范化，所以只要**路径前缀**的写法不唯一（Windows 的 8.3 短名、大小写，
+    // 或路径中间有链接），一个货真价实的普通目录就会被判成「链接」——而 repair 正是
+    // 据此决定要不要删掉它（见 lib/integrity.js 的 profile-link 修复分支）。
+    // 判错的后果是删掉用户的目录，因此这里既验判定，也真的跑一次修复看目录还在不在。
+    const { options, linkPath, home } = makeWorkspace();
+    removeLinkForTest(linkPath);
+    mkdirSync(linkPath, { recursive: true });
+    writeFileSync(path.join(linkPath, 'keep.txt'), '必须留下');
+
+    // 用别名写法去指同一个 profile，制造「前缀不规范」的情形。
+    const alias = makeAliasPath(home);
+    const aliasedEnv = { ...options.env, DSH_PROFILE_DIR: path.join(alias, 'profiles', 'web') };
+    const aliased = { ...options, env: aliasedEnv };
+    assert.notEqual(path.join(alias, 'profiles', 'web'), options.env.DSH_PROFILE_DIR);
+
+    const report = await checkIntegrity(aliased);
+    const check = find(report, 'profile-link');
+    assert.equal(check.status, 'error');
+    assert.equal(check.repairable, false, '普通目录被当成了可以删掉重建的链接');
+    assert.match(check.detail, /不是本插件/);
+
+    const result = await repairIntegrity(aliased);
+    assert.equal(result.repairedCount, 0);
+    assert.ok(existsSync(path.join(linkPath, 'keep.txt')), '修复把普通目录删掉了');
+  });
+
+  it('偏好文件损坏时标成可修复', async () => {    const { options, statePath, home } = makeWorkspace();
     mkdirSync(home, { recursive: true });
     writeFileSync(statePath, '{ 这不是 JSON');
     const report = await checkIntegrity(options);
