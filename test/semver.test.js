@@ -75,7 +75,7 @@ describe('isNewer', () => {
   });
 
   it('当前版本是更新的预发布版时不再提示更新', () => {
-    // 本机跑 rc 版、仓库 latest 还是旧稳定版，不应把人降级。
+    // 本机跑 rc 版、注册表 latest 还是旧稳定版，不应把人降级。
     assert.equal(isNewer('0.1.6', '0.2.0-rc.1'), false);
   });
 

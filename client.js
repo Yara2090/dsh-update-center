@@ -2,7 +2,7 @@
  * 「更新与版本」设置页的浏览器半边。
  *
  * 用途：在 Harness Web 的设置面板里注册一个 settings.section 页面，展示
- * 已安装版本与仓库上的版本，并允许用户检测和安装更新。
+ * 已安装版本与注册表上的版本，并允许用户检测和安装更新。
  *
  * 逻辑要点：
  *   - 这是 dsh.client 的构建产物格式（window.__ModuleLoader__.load），必须
@@ -169,7 +169,7 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: '更新与版本',
       title: '更新与版本',
-      description: '检查仓库中的 DeepSeek Harness 新版本，并在此直接安装。',
+      description: '检查注册表中的 DeepSeek Harness 新版本，并在此直接安装。',
       versionSection: '版本信息',
       currentVersion: '已安装',
       runningVersion: '运行中',
@@ -182,7 +182,7 @@ window.__ModuleLoader__.load({
       upToDate: '当前已是最新版本。',
       updateAvailable: '发现新版本，可以更新。',
       notChecked: '尚未检测。',
-      checkFailed: '无法读取版本仓库',
+      checkFailed: '无法读取注册表',
       checkNow: '立即检查',
       updateNow: '立即更新',
       installing: '正在安装…',
