@@ -1,4 +1,4 @@
-# dsh-update-center
+# DSH 更新与版本（dsh-update-center）
 
 [![测试](https://github.com/Yara2090/dsh-update-center/actions/workflows/test.yml/badge.svg)](https://github.com/Yara2090/dsh-update-center/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -23,14 +23,82 @@ imports `react`.
 
 ---
 
+## 亮点
+
+- **版本一眼看清** —— 同时显示「已安装」与「最新」两个版本，可切「稳定版 / 预览版」通道；装到磁盘但还没重启时会并排列出「已安装」和「运行中」，不让人误以为已经生效。
+- **一键更新，进度是真的** —— 不编造百分比（npm 不告诉调用方总量），给的是真实数字：已用时长、下载字节、速率、已取包数；npm 静默时另有说明，不假装一切正常。
+- **完整性自检 + 一键修复** —— 10 项检查覆盖插件文件、源码依赖、profile 注册与链接、偏好文件、运行环境。每项修复先写 `.bak` 备份，只补缺失、不删用户内容，反复点也不会越改越乱。
+- **不用再去桌面找快捷方式** —— 「停止 Harness」做进设置页，点两次确认。顺带把「关浏览器 ≠ 停服务」这件事在页面上说清楚。
+- **只对本机开放** —— 那条能替换全局 npm 包的路由只接受回环地址，非回环一律 `403`；每个会写磁盘的动作都有明确边界。
+- **零依赖、无构建** —— 纯 ESM，插件自身不装任何运行时依赖，也没有打包步骤；浏览器半边只用宿主提供的 `react`。
+
+---
+
+## 安装
+
+两种方式，任选一种。前提：已经装好 **Node ≥ 20** 和 **DeepSeek Harness**。
+
+### 方式一：纯手动
+
+```powershell
+# 1. 下载
+git clone https://github.com/Yara2090/dsh-update-center.git C:\dsh\dsh-update-center
+
+# 2. 装进 web profile（装依赖）
+dsh plugin --profile web add "file:C:\dsh\dsh-update-center"
+```
+
+3. 让插件真正启用：打开 `~/.dsh/profiles/web/package.json`，在 `dsh.profile.bundles` 里加上一行
+   `"@local/dsh-update-center"`。
+
+   > 这一步别省：`dsh plugin add` 只装依赖，不写 bundle 列表。少了它，插件不会被加载，
+   > 设置里也就不会出现「更新与版本」。
+
+4. 重启 Harness，打开 **设置 → 更新与版本**。
+
+### 方式二：把 GitHub 地址交给 DSH，让它装
+
+在 Harness 的对话框里发一句：
+
+> 把 https://github.com/Yara2090/dsh-update-center 装成插件
+
+DSH 会自己克隆、装依赖、并把插件写进 profile 的 bundle 列表；按它说的重启一次即可。
+
+装好之后基本不用管：默认每 6 小时自动查一次新版本，有新版就在这个页面里提示。
+
+### 出问题时
+
+| 现象 | 怎么办 |
+|---|---|
+| 设置里找不到「更新与版本」 | 多半是 bundle 列表没写进去；按方式一第 3 步检查 `dsh.profile.bundles` |
+| 页面在，但卡片里报问题 | 点卡片里的「一键修复」，能补的它会补，补不了的会说明要你做什么 |
+| 浏览器打不开这个页面 | 它只对本机回环地址开放，在跑 Harness 的那台机器上打开 |
+| 提示找不到 `dsh` 命令 | 先 `npm i -g @deepseek-ai/dsh` |
+
+## 卸载
+
+三步，都不影响你装的其它插件：
+
+1. 从 profile 的 bundle 列表里删掉 `"@local/dsh-update-center"` 那一行（`~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles`）。
+2. 卸掉依赖：`dsh plugin --profile web remove @local/dsh-update-center`
+3. 重启 Harness。
+
+偏好文件 `<DSH_HOME>/dsh-update-center.json` 可以留着（以后装回来设置还在），也可以直接删。
+
+**没有别的残留**：它不改 Harness 的核心文件，也不往别处写东西。唯一的例外是你点过「一键修复」——那只动 profile 清单、profile 里的插件链接和上面那个偏好文件，而且每项都留了同名 `.bak` 备份。
+
+---
+
 ## 目录
 
+- [亮点](#亮点)
+- [安装](#安装)
+- [卸载](#卸载)
 - [界面与功能](#界面与功能)
 - [完整性检查与一键修复](#完整性检查与一键修复)
 - [运行控制：停止](#运行控制停止)
 - [工作原理](#工作原理)
 - [HTTP 接口](#http-接口)
-- [安装](#安装)
 - [配置](#配置)
 - [开发与测试](#开发与测试)
 - [目录结构](#目录结构)
@@ -214,47 +282,6 @@ Chromium 只允许「由脚本打开的」或「没有历史记录的」标签�
 | `summary` | `errors` / `warnings` / `repairable` / `total` 计数 |
 | `checks[]` | 每项为 `{ id, status, repairable, detail }`；`status` 取 `ok` / `warn` / `error` |
 | `/repair` 额外返回 | `repaired[]`（含每项的 `ok` 与说明）、`repairedCount`、`failedCount`、`restartRequired`、以及修复后的 `report` |
-
-## 安装
-
-两种方式，任选一种。前提：已经装好 **Node ≥ 20** 和 **DeepSeek Harness**。
-
-### 方式一：纯手动
-
-```powershell
-# 1. 下载
-git clone https://github.com/Yara2090/dsh-update-center.git C:\dsh\dsh-update-center
-
-# 2. 装进 web profile（装依赖）
-dsh plugin --profile web add "file:C:\dsh\dsh-update-center"
-```
-
-3. 让插件真正启用：打开 `~/.dsh/profiles/web/package.json`，在 `dsh.profile.bundles` 里加上一行
-   `"@local/dsh-update-center"`。
-
-   > 这一步别省：`dsh plugin add` 只装依赖，不写 bundle 列表。少了它，插件不会被加载，
-   > 设置里也就不会出现「更新与版本」。
-
-4. 重启 Harness，打开 **设置 → 更新与版本**。
-
-### 方式二：把 GitHub 地址交给 DSH，让它装
-
-在 Harness 的对话框里发一句：
-
-> 把 https://github.com/Yara2090/dsh-update-center 装成插件
-
-DSH 会自己克隆、装依赖、并把插件写进 profile 的 bundle 列表；按它说的重启一次即可。
-
-### 出问题时
-
-| 现象 | 怎么办 |
-|---|---|
-| 设置里找不到「更新与版本」 | 多半是 bundle 列表没写进去；按方式一第 3 步检查 `dsh.profile.bundles` |
-| 页面在，但卡片里报问题 | 点卡片里的「一键修复」，能补的它会补，补不了的会说明要你做什么 |
-| 浏览器打不开这个页面 | 它只对本机回环地址开放，在跑 Harness 的那台机器上打开 |
-| 提示找不到 `dsh` 命令 | 先 `npm i -g @deepseek-ai/dsh` |
-
-装好之后基本不用管：默认每 6 小时自动查一次新版本，有新版就在这个页面里提示。
 
 ## 配置
 
